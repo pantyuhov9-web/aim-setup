@@ -37,13 +37,16 @@ fi
 exit ${STUB_CURL_RC:-0}'
   stub xcode-select 'exit ${STUB_CLT_RC:-0}'
   stub git 'touch "'"$W"'/git-ran"
+printf "%s\n" "$*" >> "'"$W"'/git-calls"
 case "$1 $2 $3" in
   "--version "*) echo "git version 2.47.1" ;;
   "config --global user.name") echo "${STUB_GIT_NAME-Olena Test}" ;;
   "config --global user.email") echo "${STUB_GIT_EMAIL-olena@example.com}" ;;
   "config --get-all credential.https://github.com.helper") echo "${STUB_HELPER-!/opt/homebrew/bin/gh auth git-credential}" ;;
   "config --get-all credential.helper") echo "${STUB_ANY_HELPER-osxkeychain}" ;;
-  "clone -q "*) mkdir -p "$4" ;;
+  "clone -q "*) printf "%s|%s\n" "${GIT_TERMINAL_PROMPT-unset}" "${GIT_ASKPASS-unset}" > "'"$W"'/git-clone-env"
+    [ "${STUB_CLONE_RC:-0}" -eq 0 ] || exit "$STUB_CLONE_RC"
+    mkdir -p "$4" ;;
   "push -q "*) exit ${STUB_PUSH_RC:-0} ;;
   "rev-parse HEAD "*) echo abc123 ;;
   "ls-remote origin "*) printf "abc123\trefs/heads/main\n" ;;
@@ -379,6 +382,35 @@ test_push_test_reports_a_refused_push() {
   ok "push refused: G7 fails" has_status G7 fail
   ok "push refused: says so" contains "GitHub не прийняв відправку"
   ok "push refused: the fix switches Git to the GitHub CLI sign-in" contains '{"cmd":"gh auth setup-git","needs":""}'
+  teardown
+}
+
+test_push_test_offers_the_fix_when_git_cannot_sign_in() {
+  # A private repo needs a sign-in already at the clone, so that is where a Mac whose
+  # Git has no GitHub sign-in stops.
+  setup
+  run_check STUB_CLONE_RC=128 -- --json --push-test
+  ok "no sign-in at the clone: G7 fails" has_status G7 fail
+  ok "no sign-in at the clone: says so" contains "не вдалося отримати сховище з GitHub"
+  ok "no sign-in at the clone: the fix switches Git to the GitHub CLI sign-in" contains '{"cmd":"gh auth setup-git","needs":""}'
+  teardown
+}
+
+test_push_test_never_asks_for_a_user_name() {
+  # Without these two settings Git prints "Username for 'https://github.com':" in the
+  # student's terminal, or opens an editor's pop-up, and waits.
+  setup
+  run_check GIT_ASKPASS=/usr/local/bin/some-askpass -- --json --push-test
+  ok "no prompts: Git ran with terminal prompts off and no askpass program" test "$(cat "$W/git-clone-env" 2>/dev/null)" = "0|"
+  teardown
+}
+
+test_push_test_commit_is_never_signed() {
+  # A signing setup that asks for a passphrase would stop the check; the scratch commit
+  # needs no signature.
+  setup
+  run_check -- --json --push-test
+  ok "scratch commit: signing is switched off" grep -q -- "-c commit.gpgsign=false commit" "$W/git-calls"
   teardown
 }
 

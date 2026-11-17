@@ -189,8 +189,12 @@ check_claude() {
 
 # ---- Git and GitHub --------------------------------------------------------------------
 
-push_test() { # prints the repo name on success, a reason on failure
+push_test() { # prints the repo name on success, a reason on failure; returns 2 when Git got no sign-in
   local login repo dir head remote
+  # With no stored sign-in Git would print "Username for 'https://github.com':" in the
+  # student's terminal, or open an editor's pop-up, and wait. These two settings make it
+  # fail at once instead. push_test runs inside $(...), so the export ends with it.
+  export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
   login="$(with_timeout 20 gh api user -q .login 2>/dev/null)"
   [ -n "$login" ] || { printf '%s' "не вдалося дізнатися обліковий запис GitHub"; return 1; }
   repo="$login/aim-setup-check"
@@ -200,14 +204,18 @@ push_test() { # prints the repo name on success, a reason on failure
       || { printf '%s' "не вдалося створити сховище aim-setup-check"; return 1; }
   fi
   dir="$TMP/push"
+  # The repo is private, so the clone already needs Git's sign-in: a Mac where Git has
+  # none stops here, not at the push.
   with_timeout 60 git clone -q "https://github.com/$repo.git" "$dir" >/dev/null 2>&1 \
-    || { printf '%s' "не вдалося отримати сховище з GitHub"; return 1; }
+    || { printf '%s' "не вдалося отримати сховище з GitHub"; return 2; }
+  # The scratch commit needs no signature, and a signing setup could stop to ask for a passphrase.
   ( cd "$dir" && git checkout -q -B main </dev/null \
       && date -u '+%Y-%m-%dT%H:%M:%SZ' > check.txt \
-      && git add check.txt </dev/null && git commit -q -m "setup check" </dev/null ) >/dev/null 2>&1 \
+      && git add check.txt </dev/null \
+      && git -c commit.gpgsign=false commit -q -m "setup check" </dev/null ) >/dev/null 2>&1 \
     || { printf '%s' "не вдалося зберегти зміну"; return 1; }
   ( cd "$dir" && with_timeout 60 git push -q -u origin main ) >/dev/null 2>&1 \
-    || { printf '%s' "GitHub не прийняв відправку"; return 1; }
+    || { printf '%s' "GitHub не прийняв відправку"; return 2; }
   head="$(cd "$dir" && git rev-parse HEAD 2>/dev/null </dev/null)"
   remote="$(cd "$dir" && with_timeout 30 git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
   [ -n "$head" ] && [ "$head" = "$remote" ] \
@@ -297,16 +305,18 @@ check_git() {
   if [ "$PUSH_TEST" -eq 0 ]; then
     rec G7 github "Пробна відправка на GitHub" skip "вимкнено; вмикається ключем --push-test"
   elif passed G3 && passed G5 && [ "$(status_of G6)" != fail ]; then
-    if out="$(push_test)"; then
-      rec G7 github "Пробна відправка на GitHub" pass "зміну відправлено у приватне сховище $out"
-    elif [ "$out" = "GitHub не прийняв відправку" ]; then
-      rec G7 github "Пробна відправка на GitHub" fail "$out" \
-        "Команда перемикає Git на вхід через GitHub CLI. Після неї запустіть перевірку з пробною відправкою ще раз." \
-        "-${TAB}gh auth setup-git"
-    else
-      rec G7 github "Пробна відправка на GitHub" fail "$out" \
-        "Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові."
-    fi
+    out="$(push_test)"
+    case $? in
+      0)
+        rec G7 github "Пробна відправка на GitHub" pass "зміну відправлено у приватне сховище $out" ;;
+      2)
+        rec G7 github "Пробна відправка на GitHub" fail "$out" \
+          "Команда перемикає Git на вхід через GitHub CLI. Після неї запустіть перевірку з пробною відправкою ще раз." \
+          "-${TAB}gh auth setup-git" ;;
+      *)
+        rec G7 github "Пробна відправка на GitHub" fail "$out" \
+          "Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові." ;;
+    esac
   else
     rec G7 github "Пробна відправка на GitHub" skip "спершу виправте пункти вище"
   fi
