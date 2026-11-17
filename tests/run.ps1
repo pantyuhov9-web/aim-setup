@@ -378,6 +378,123 @@ function Test-AimUnsupportedRegionIsNamed {
   Remove-Machine
 }
 
+function Test-AimHealthyClaude {
+  New-Machine
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'claude: C1 passes' (Test-Status C1 'pass')
+  Write-Ok 'claude: C2 passes' (Test-Status C2 'pass')
+  Write-Ok 'claude: C3 passes' (Test-Status C3 'pass')
+  Write-Ok 'claude: C4 passes' (Test-Status C4 'pass')
+  Write-Ok 'claude: names the version it found' (Test-Text '2.1.300 (Claude Code)')
+  Remove-Machine
+}
+
+function Test-AimNoClaudeAnywhereFails {
+  New-Machine
+  Remove-Tool claude
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'no Claude: C1 fails' (Test-Status C1 'fail')
+  Write-Ok 'no Claude: C2 is info' (Test-Status C2 'info')
+  Write-Ok 'no Claude: C4 is skipped' (Test-Status C4 'skip')
+  Write-Ok "no Claude: prints Anthropic's installer" (Test-Text 'irm https://claude.ai/install.ps1 | iex')
+  Write-Ok 'no Claude: exit code 1' ($script:Rc -eq 1)
+  Remove-Machine
+}
+
+function Test-AimDesktopAppAloneIsEnough {
+  New-Machine
+  Remove-Tool claude
+  New-Item -ItemType Directory -Path (Join-Path $script:LocalApp 'Microsoft\WindowsApps') -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $script:LocalApp 'Microsoft\WindowsApps\claude-desktop.exe') -Value 'x' -Encoding ascii
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'desktop only: C1 passes' (Test-Status C1 'pass')
+  Write-Ok 'desktop only: names the app' (Test-Text 'знайдено: застосунок')
+  Write-Ok 'desktop only: C2 is info, not a failure' (Test-Status C2 'info')
+  Write-Ok 'desktop only: C3 is info, not a failure' (Test-Status C3 'info')
+  Write-Ok 'desktop only: exit code 0' ($script:Rc -eq 0)
+  Remove-Machine
+}
+
+function Test-AimPackagedDesktopAppIsFound {
+  # The Windows desktop app installs as a packaged app, with a folder under Packages.
+  New-Machine
+  Remove-Tool claude
+  New-Item -ItemType Directory -Path (Join-Path $script:LocalApp 'Packages\Claude_pzs8sxrjxfjjc') -Force | Out-Null
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'packaged app: C1 passes' (Test-Status C1 'pass')
+  Remove-Machine
+}
+
+function Test-AimVsCodeExtensionAloneIsEnough {
+  New-Machine
+  Remove-Tool claude
+  New-Item -ItemType Directory -Path (Join-Path $script:HomeDir '.vscode\extensions\anthropic.claude-code-2.1.300-win32-x64') -Force | Out-Null
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'VS Code only: C1 passes' (Test-Status C1 'pass')
+  Write-Ok 'VS Code only: names VS Code' (Test-Text 'знайдено: VS Code')
+  Remove-Machine
+}
+
+function Test-AimAllThreeSurfacesAreNamed {
+  New-Machine
+  New-Item -ItemType Directory -Path (Join-Path $script:LocalApp 'Microsoft\WindowsApps') -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $script:LocalApp 'Microsoft\WindowsApps\claude-desktop.exe') -Value 'x' -Encoding ascii
+  New-Item -ItemType Directory -Path (Join-Path $script:HomeDir '.vscode\extensions\anthropic.claude-code-2.1.300-win32-x64') -Force | Out-Null
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'three surfaces: C1 names all of them' (Test-Text 'знайдено: термінал, застосунок, VS Code')
+  Remove-Machine
+}
+
+function Test-AimCliInstalledButNotInPath {
+  New-Machine
+  Remove-Tool claude
+  New-Item -ItemType Directory -Path (Join-Path $script:HomeDir '.local\bin') -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $script:HomeDir '.local\bin\claude.exe') -Value 'x' -Encoding ascii
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'PATH: C2 fails' (Test-Status C2 'fail')
+  Write-Ok 'PATH: C1 still passes' (Test-Status C1 'pass')
+  Write-Ok 'PATH: C3 skipped' (Test-Status C3 'skip')
+  Write-Ok 'PATH: prints the user-PATH command' (Test-Text "[Environment]::SetEnvironmentVariable('PATH'")
+  Write-Ok 'PATH: changes the user list, not the system one' (Test-Text "'User')")
+  Write-Ok 'PATH: never uses setx on PATH' (Test-NoText 'setx PATH')
+  Write-Ok 'PATH: the command carries no shell variable any shell would eat' (Test-NoText '$env:USERPROFILE')
+  Write-Ok 'PATH: asks for a new window' (Test-Text 'відкрийте нове вікно')
+  Remove-Machine
+}
+
+function Test-AimClaudeLoggedOutWarns {
+  New-Machine
+  Set-Rules claude @("--version`t0`t2.1.300 (Claude Code)", "auth status`t1`t", "*`t0`t")
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'logged out: C3 warns' (Test-Status C3 'warn')
+  Write-Ok 'logged out: exit code stays 0' ($script:Rc -eq 0)
+  Remove-Machine
+}
+
+function Test-AimClaudeModePassesByConstruction {
+  New-Machine
+  Remove-Tool claude
+  Invoke-Check -Environment @{ CLAUDECODE = '1'; CLAUDE_CODE_ENTRYPOINT = 'claude-vscode' }
+  Write-Ok 'Claude mode: C1 passes by construction' (Test-Status C1 'pass')
+  Write-Ok 'Claude mode: names the surface' (Test-Text 'claude-vscode')
+  Remove-Machine
+}
+
+function Test-AimClaudeCommandShadowedByTheApp {
+  New-Machine
+  Remove-Tool claude
+  $apps = Join-Path $script:LocalApp 'Microsoft\WindowsApps'
+  New-Item -ItemType Directory -Path $apps -Force | Out-Null
+  Copy-Item -LiteralPath $script:StubExe -Destination (Join-Path $apps 'claude.exe') -Force
+  Set-Content -LiteralPath (Join-Path $apps 'claude.exe.rules') -Encoding UTF8 -Value @("*`t0`t")
+  Invoke-Check -Environment @{ PATH = ($script:Bin + ';' + $apps + ';' + (Join-Path $env:SystemRoot 'System32')) } -Switches @('-Json')
+  Write-Ok 'shadowed: C4 warns' (Test-Status C4 'warn')
+  Write-Ok 'shadowed: says the command leads to the app' (Test-Text 'веде до застосунку')
+  Write-Ok 'shadowed: asks for a restart of Claude' (Test-Text 'перезапустіть Claude')
+  Write-Ok 'shadowed: exit code stays 0' ($script:Rc -eq 0)
+  Remove-Machine
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 Initialize-Stub

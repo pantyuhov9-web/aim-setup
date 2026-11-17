@@ -292,6 +292,80 @@ function Invoke-SystemChecks {
   }
 }
 
+# ---- Claude Code -----------------------------------------------------------------------
+
+function Test-ClaudeDesktop {
+  # The Windows desktop app ships as a packaged app: a folder under LOCALAPPDATA\Packages and an
+  # alias in WindowsApps. A classic install under LOCALAPPDATA\Programs is checked as well.
+  $local = [string]$env:LOCALAPPDATA
+  if (-not $local) { return $false }
+  if (Test-Path -LiteralPath (Join-Path $local 'Microsoft\WindowsApps\claude-desktop.exe')) { return $true }
+  if (Get-ChildItem -LiteralPath (Join-Path $local 'Packages') -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue) { return $true }
+  if (Get-ChildItem -LiteralPath (Join-Path $local 'Programs') -Directory -Filter 'claude*' -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Claude.exe') }) { return $true }
+  return $false
+}
+
+function Invoke-ClaudeChecks {
+  $cliPath = Get-AppPath 'claude'
+  $cliFile = Join-Path ([string]$env:USERPROFILE) '.local\bin\claude.exe'
+  $hasFile = Test-Path -LiteralPath $cliFile
+  $installFix = New-Fix 'powershell -NoProfile -Command "irm https://claude.ai/install.ps1 | iex"' 'new-window'
+
+  if ($script:Driver -eq 'claude') {
+    $surface = [string]$env:CLAUDE_CODE_ENTRYPOINT
+    if (-not $surface) { $surface = 'claude' }
+    Add-Record C1 claude 'Claude Code' pass ('працює (' + $surface + ')')
+  } else {
+    $found = @()
+    if ($cliPath -or $hasFile) { $found += 'термінал' }
+    if (Test-ClaudeDesktop) { $found += 'застосунок' }
+    if (Get-ChildItem -LiteralPath (Join-Path ([string]$env:USERPROFILE) '.vscode\extensions') -Directory `
+          -Filter 'anthropic.claude-code-*' -ErrorAction SilentlyContinue) { $found += 'VS Code' }
+    if ($found.Count -gt 0) {
+      Add-Record C1 claude 'Claude Code' pass ('знайдено: ' + ($found -join ', '))
+    } else {
+      Add-Record C1 claude 'Claude Code' fail 'не знайдено' `
+        'Встановіть Claude Code за кроком 0 з інструкції. Для термінала вставте цю команду.' @($installFix)
+    }
+  }
+
+  if ($cliPath) {
+    $v = Invoke-Program -File $cliPath -Arguments @('--version') -TimeoutSec 10
+    $ver = Get-FirstLine $v.Out
+    if (-not $ver) { $ver = 'знайдено' }
+    Add-Record C2 claude 'Команда claude в терміналі' pass $ver
+    $a = Invoke-Program -File $cliPath -Arguments @('auth', 'status') -TimeoutSec 15
+    if ($a.Code -eq 0) {
+      Add-Record C3 claude 'Вхід у Claude з термінала' pass 'вхід виконано'
+    } else {
+      Add-Record C3 claude 'Вхід у Claude з термінала' warn 'вхід не виконано' `
+        'Наберіть claude у вікні термінала та увійдіть у свій обліковий запис у браузері.' `
+        @((New-Fix 'claude' 'browser'))
+    }
+  } elseif ($hasFile) {
+    # Anthropic's own fix, in one line that runs unchanged in CMD, PowerShell and Git Bash:
+    # no $ and no % token, so no shell expands anything before PowerShell sees it.
+    Add-Record C2 claude 'Команда claude в терміналі' fail 'Claude встановлено, але вікно не бачить команду' `
+      'Windows шукає програми у списку папок PATH. Команда додає туди папку з Claude; вона змінює лише ваш список, не системний.' `
+      @((New-Fix 'powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable(''PATH'', [Environment]::GetEnvironmentVariable(''PATH'', ''User'') + '';'' + [Environment]::GetFolderPath(''UserProfile'') + ''\.local\bin'', ''User'')"' 'new-window'))
+    Add-Record C3 claude 'Вхід у Claude з термінала' skip 'спершу потрібна команда claude'
+  } else {
+    Add-Record C2 claude 'Команда claude в терміналі' info 'термінальну версію не встановлено; для застосунку і VS Code вона не потрібна'
+    Add-Record C3 claude 'Вхід у Claude з термінала' info 'без термінальної версії не перевіряється'
+  }
+
+  if (-not $cliPath) {
+    Add-Record C4 claude 'Команда claude не перекрита' skip 'спершу потрібна команда claude'
+  } elseif ($cliPath -match '(?i)\\WindowsApps\\') {
+    Add-Record C4 claude 'Команда claude не перекрита' warn 'команда claude веде до застосунку, а не до Claude Code' `
+      'Старі версії застосунку Claude реєстрували свій claude.exe так, що він перекриває Claude Code. Оновіть застосунок Claude до останньої версії.' `
+      @((New-Fix 'winget upgrade --id Anthropic.Claude -e' 'restart-app'))
+  } else {
+    Add-Record C4 claude 'Команда claude не перекрита' pass 'команда claude веде до Claude Code'
+  }
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 function Write-Line {
