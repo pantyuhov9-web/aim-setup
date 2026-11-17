@@ -366,6 +366,332 @@ function Invoke-ClaudeChecks {
   }
 }
 
+# ---- Git and GitHub --------------------------------------------------------------------
+
+function Invoke-PushTest {
+  # Returns @{ Code; Reason }. Code 0 = pushed, 2 = Git got no sign-in, 1 = anything else.
+  # With no stored sign-in Git would print "Username for 'https://github.com':" and wait, or
+  # Git Credential Manager would open a window. GIT_TERMINAL_PROMPT=0 stops the first, and the
+  # manager's own documented setting stops the second, so the step fails at once instead.
+  # An empty GIT_ASKPASS, which the macOS checker exports, cannot be passed here: Windows
+  # deletes a variable that is set to an empty string.
+  $noPrompt = @{ GIT_TERMINAL_PROMPT = '0' }
+  $quiet = @('-c', 'credential.interactive=false')
+  $u = Invoke-Program -File $script:GhPath -Arguments @('api', 'user', '-q', '.login') -TimeoutSec 20
+  $login = Get-FirstLine $u.Out
+  if ($u.Code -ne 0 -or -not $login) { return @{ Code = 1; Reason = 'не вдалося дізнатися обліковий запис GitHub' } }
+  $repo = $login + '/aim-setup-check'
+  $view = Invoke-Program -File $script:GhPath -Arguments @('repo', 'view', $repo) -TimeoutSec 20
+  if ($view.Code -ne 0) {
+    $create = Invoke-Program -File $script:GhPath -TimeoutSec 30 -Arguments @(
+      'repo', 'create', 'aim-setup-check', '--private', '-d', 'Setup check for an A&I Mastery course. Safe to delete.')
+    if ($create.Code -ne 0) { return @{ Code = 1; Reason = 'не вдалося створити сховище aim-setup-check' } }
+  }
+  $dir = Join-Path $script:Tmp 'push'
+  # The repo is private, so the clone already needs Git's sign-in: a PC where Git has none stops
+  # here, not at the push.
+  $clone = Invoke-Program -File $script:GitPath -TimeoutSec 60 -SetEnv $noPrompt `
+    -Arguments ($quiet + @('clone', '-q', ('https://github.com/' + $repo + '.git'), $dir))
+  if ($clone.Code -ne 0) { return @{ Code = 2; Reason = 'не вдалося отримати сховище з GitHub' } }
+  $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+  Set-Content -LiteralPath (Join-Path $dir 'check.txt') -Value $stamp -Encoding ascii
+  $gitDir = @('-C', $dir)
+  $branch = Invoke-Program -File $script:GitPath -Arguments ($gitDir + @('checkout', '-q', '-B', 'main')) -TimeoutSec 20
+  $add = Invoke-Program -File $script:GitPath -Arguments ($gitDir + @('add', 'check.txt')) -TimeoutSec 20
+  # The scratch commit needs no signature, and a signing setup could stop to ask for a passphrase.
+  $commit = Invoke-Program -File $script:GitPath -TimeoutSec 30 `
+    -Arguments ($gitDir + @('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'setup-check'))
+  if ($branch.Code -ne 0 -or $add.Code -ne 0 -or $commit.Code -ne 0) {
+    return @{ Code = 1; Reason = 'не вдалося зберегти зміну' }
+  }
+  $push = Invoke-Program -File $script:GitPath -TimeoutSec 60 -SetEnv $noPrompt `
+    -Arguments ($gitDir + $quiet + @('push', '-q', '-u', 'origin', 'main'))
+  if ($push.Code -ne 0) { return @{ Code = 2; Reason = 'GitHub не прийняв відправку' } }
+  $head = Get-FirstLine (Invoke-Program -File $script:GitPath -Arguments ($gitDir + @('rev-parse', 'HEAD')) -TimeoutSec 20).Out
+  $ls = Invoke-Program -File $script:GitPath -TimeoutSec 30 -SetEnv $noPrompt `
+    -Arguments ($gitDir + $quiet + @('ls-remote', 'origin', 'refs/heads/main'))
+  $remote = (Get-FirstLine $ls.Out) -split '\s+' | Select-Object -First 1
+  if (-not $head -or $head -ne $remote) { return @{ Code = 1; Reason = 'GitHub не показує відправлену зміну' } }
+  return @{ Code = 0; Reason = 'aim-setup-check' }
+}
+
+function Invoke-GitChecks {
+  $sampleName = 'Імʼя Прізвище'
+  $sampleEmail = 'you@example.com'
+  $script:GitPath = Get-AppPath 'git'
+  $script:GhPath = Get-AppPath 'gh'
+
+  if ($script:GitPath) {
+    $v = Invoke-Program -File $script:GitPath -Arguments @('--version') -TimeoutSec 10
+    $ver = (Get-FirstLine $v.Out) -replace '^git version ', ''
+    if (-not $ver) { $ver = 'знайдено' }
+    Add-Record G1 github 'Git' pass $ver
+  } else {
+    if ($script:HasWinget) {
+      $fix = @((New-Fix 'winget install --id Git.Git -e --source winget' 'click'))
+      $why = 'Git зберігає історію ваших файлів і надсилає її на GitHub. Під час встановлення Windows запитає дозвіл.'
+    } else {
+      $fix = @((New-Fix 'https://git-scm.com/downloads/win' 'browser'))
+      $why = 'Git зберігає історію ваших файлів і надсилає її на GitHub. winget не знайдено, тому відкрийте сторінку, завантажте Git для Windows і встановіть його, нічого не змінюючи у вікнах установника.'
+    }
+    Add-Record G1 github 'Git' fail 'не встановлено' $why $fix
+  }
+
+  # Claude Code runs shell commands through Git Bash when it finds one, and through PowerShell
+  # otherwise. It looks in the two default install folders, then next to the git on PATH.
+  if (Test-RecordPass G1) {
+    # The two folders Claude Code looks in first. Windows gives every new process its own
+    # ProgramFiles values, so these cannot be pointed elsewhere from outside: the tests pass
+    # the folders to look in through AIM_TEST_GITROOTS instead.
+    $roots = @((Join-Path ([string]$env:ProgramFiles) 'Git'), (Join-Path ([string]${env:ProgramFiles(x86)}) 'Git'))
+    if ($env:AIM_TEST_GITROOTS) { $roots = @($env:AIM_TEST_GITROOTS -split ';') }
+    $bash = ''
+    $standard = $true
+    foreach ($r in $roots) {
+      if (-not $r) { continue }
+      $p = Join-Path $r 'bin\bash.exe'
+      if (Test-Path -LiteralPath $p) { $bash = $p; break }
+    }
+    if (-not $bash) {
+      $root = Split-Path (Split-Path $script:GitPath -Parent) -Parent
+      $candidate = Join-Path $root 'bin\bash.exe'
+      if (Test-Path -LiteralPath $candidate) { $bash = $candidate; $standard = $false }
+    }
+    if ($bash -and $standard) {
+      Add-Record G2 github 'Git Bash' pass 'знайдено у стандартній папці Git'
+    } elseif ($bash) {
+      Add-Record G2 github 'Git Bash' warn ('знайдено не у стандартній папці: ' + (Get-TildePath $bash)) `
+        ('Claude Code шукає Git Bash у «Program Files». Щоб він узяв ваш, допишіть у файл ~\.claude\settings.json: "env": { "CLAUDE_CODE_GIT_BASH_PATH": "' + ((Get-TildePath $bash) -replace '\\', '\\') + '" } — і перезапустіть Claude. Без цього Claude Code виконує команди через PowerShell, і це теж працює.')
+    } else {
+      if ($script:HasWinget) {
+        $fix = @((New-Fix 'winget install --id Git.Git -e --source winget' 'click'))
+      } else {
+        $fix = @((New-Fix 'https://git-scm.com/downloads/win' 'browser'))
+      }
+      Add-Record G2 github 'Git Bash' warn 'не знайдено разом з Git' `
+        'Git Bash входить до Git для Windows. Без нього Claude Code виконує команди через PowerShell — це працює, але частина скриптів з уроків розрахована на Bash. Перевстановіть Git для Windows, не змінюючи нічого у вікнах установника.' $fix
+    }
+  } else {
+    Add-Record G2 github 'Git Bash' skip 'спершу потрібен Git'
+  }
+
+  if (Test-RecordPass G1) {
+    $name = Get-FirstLine (Invoke-Program -File $script:GitPath -Arguments @('config', '--global', 'user.name') -TimeoutSec 10).Out
+    $email = Get-FirstLine (Invoke-Program -File $script:GitPath -Arguments @('config', '--global', 'user.email') -TimeoutSec 10).Out
+    $why = 'Git підписує кожне збереження іменем і поштою. Підставте в лапках свої; пошта та сама, що в обліковому записі GitHub.'
+    $fix = @(
+      (New-Fix ('git config --global user.name "' + $sampleName + '"')),
+      (New-Fix ('git config --global user.email "' + $sampleEmail + '"')))
+    if (-not $name -or -not $email) {
+      Add-Record G3 github 'Імʼя та пошта в Git' fail 'не вказано' $why $fix
+    } elseif ($name -eq $sampleName -or $email -eq $sampleEmail) {
+      # The two commands above were pasted without putting real values into the quotes.
+      Add-Record G3 github 'Імʼя та пошта в Git' fail 'вказано зразок з підказки, а не ваші дані' $why $fix
+    } else {
+      Add-Record G3 github 'Імʼя та пошта в Git' pass 'вказано'
+    }
+  } else {
+    Add-Record G3 github 'Імʼя та пошта в Git' skip 'спершу потрібен Git'
+  }
+
+  if ($script:GhPath) {
+    $v = Invoke-Program -File $script:GhPath -Arguments @('--version') -TimeoutSec 10
+    $ver = ((Get-FirstLine $v.Out) -replace '^gh version ', '') -replace ' .*$', ''
+    if (-not $ver) { $ver = 'знайдено' }
+    Add-Record G4 github 'GitHub CLI' pass $ver
+  } else {
+    if ($script:HasWinget) {
+      $fix = @((New-Fix 'winget install --id GitHub.cli --source winget' 'new-window'))
+      $why = 'GitHub CLI виконує вхід у GitHub через браузер, а Git потім користується цим входом. Після встановлення відкрийте нове вікно.'
+    } else {
+      $fix = @((New-Fix 'https://github.com/cli/cli/releases/latest' 'browser'))
+      $why = 'GitHub CLI виконує вхід у GitHub через браузер, а Git потім користується цим входом. winget не знайдено, тому завантажте зі сторінки файл із назвою, що закінчується на windows_amd64.msi, і встановіть його.'
+    }
+    Add-Record G4 github 'GitHub CLI' fail 'не встановлено' $why $fix
+  }
+
+  if (-not (Test-RecordPass G4)) {
+    Add-Record G5 github 'Вхід у GitHub' skip 'спершу потрібен GitHub CLI'
+  } elseif (-not $script:NetOk) {
+    Add-Record G5 github 'Вхід у GitHub' skip 'потрібен інтернет'
+  } elseif ((Invoke-Program -File $script:GhPath -Arguments @('auth', 'status') -TimeoutSec 20).Code -eq 0) {
+    Add-Record G5 github 'Вхід у GitHub' pass 'вхід виконано'
+  } else {
+    # Started by Claude, "gh auth login" has no window to ask in, so it signs in and leaves Git
+    # unconnected. The second command connects Git in the same round.
+    Add-Record G5 github 'Вхід у GitHub' fail 'вхід не виконано' `
+      'Перша команда покаже одноразовий код і відкриє GitHub у браузері: введіть код і підтвердьте вхід. Друга дозволить Git користуватися цим входом.' `
+      @((New-Fix 'gh auth login --web --git-protocol https' 'browser'), (New-Fix 'gh auth setup-git'))
+  }
+
+  # The check reads helper names only, never a stored credential. Git Credential Manager ships
+  # with Git for Windows and is a sign-in route of its own, so it passes; any other helper is a
+  # warning the push test settles.
+  $otherHelper = ''
+  if ((Test-RecordPass G1) -and (Test-RecordPass G5)) {
+    $hostHelper = (Invoke-Program -File $script:GitPath -TimeoutSec 10 `
+      -Arguments @('config', '--get-all', 'credential.https://github.com.helper')).Out
+    $anyHelper = (Invoke-Program -File $script:GitPath -TimeoutSec 10 `
+      -Arguments @('config', '--get-all', 'credential.helper')).Out
+    $all = [string]$hostHelper + "`n" + [string]$anyHelper
+    $otherHelper = Get-FirstLine $anyHelper
+    if ($all -match 'gh auth git-credential') {
+      Add-Record G6 github 'Git користується входом у GitHub' pass 'через GitHub CLI'
+    } elseif ($all -match '(?im)^\s*manager(-core)?\s*$' -or $all -match '(?i)git-credential-manager') {
+      Add-Record G6 github 'Git користується входом у GitHub' pass 'через Git Credential Manager'
+    } elseif ($otherHelper) {
+      Add-Record G6 github 'Git користується входом у GitHub' warn `
+        ('Git має інший спосіб входу (' + (Get-TildePath $otherHelper) + '); перевірка не бачить, чи збережено в ньому вхід у GitHub') `
+        'Якщо відправка на GitHub не спрацює, ця команда перемкне Git на вхід через GitHub CLI.' `
+        @((New-Fix 'gh auth setup-git'))
+    } else {
+      Add-Record G6 github 'Git користується входом у GitHub' fail 'не налаштовано' `
+        'Після цієї команди Git відправляє зміни на GitHub без пароля.' `
+        @((New-Fix 'gh auth setup-git'))
+    }
+  } else {
+    Add-Record G6 github 'Git користується входом у GitHub' skip 'спершу потрібні Git і вхід у GitHub'
+  }
+
+  if (-not $script:PushTest) {
+    Add-Record G7 github 'Пробна відправка на GitHub' skip 'вимкнено; вмикається ключем -PushTest'
+  } elseif ((Test-RecordPass G3) -and (Test-RecordPass G5) -and ((Get-RecordStatus G6) -ne 'fail')) {
+    $r = Invoke-PushTest
+    if ($r.Code -eq 0) {
+      Add-Record G7 github 'Пробна відправка на GitHub' pass ('зміну відправлено у приватне сховище ' + $r.Reason)
+      # A push that went through proves the sign-in route that G6 could not see into.
+      if ((Get-RecordStatus G6) -eq 'warn') {
+        Set-RecordSettled G6 ('працює через ' + (Get-TildePath $otherHelper) + '; пробна відправка це підтвердила')
+      }
+    } elseif ($r.Code -eq 2) {
+      Add-Record G7 github 'Пробна відправка на GitHub' fail $r.Reason `
+        'Команда перемикає Git на вхід через GitHub CLI. Після неї запустіть перевірку з пробною відправкою ще раз.' `
+        @((New-Fix 'gh auth setup-git'))
+    } else {
+      Add-Record G7 github 'Пробна відправка на GitHub' fail $r.Reason `
+        'Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові.'
+    }
+  } else {
+    Add-Record G7 github 'Пробна відправка на GitHub' skip 'спершу виправте пункти вище'
+  }
+}
+
+# ---- Python ----------------------------------------------------------------------------
+
+function Add-SkippedPython {
+  param([string]$Reason, [string[]]$Ids)
+  foreach ($id in $Ids) {
+    $title = 'Запуск скрипта'
+    if ($id -eq 'P2') { $title = 'Версія Python' }
+    if ($id -eq 'P3') { $title = 'Встановлення бібліотек' }
+    Add-Record $id python $title skip $Reason
+  }
+}
+
+function Invoke-PythonChecks {
+  if ($script:HasWinget) {
+    $fix = @(
+      (New-Fix 'winget install 9NQ7512CXL7T -e --accept-package-agreements --disable-interactivity' 'new-window'),
+      (New-Fix 'py install default' 'new-window'))
+  } else {
+    $fix = @((New-Fix 'https://www.python.org/downloads/' 'browser'))
+  }
+  $why = 'Python запускає скрипти з уроків.'
+
+  # A command under WindowsApps is a Windows app-execution alias. A dead alias opens the
+  # Microsoft Store instead of running Python, so a real Python is always probed first.
+  $candidates = @()
+  foreach ($n in 'python', 'py') {
+    $p = Get-AppPath $n
+    if ($p) { $candidates += [pscustomobject]@{ Path = $p; Alias = ($p -match '(?i)\\WindowsApps\\') } }
+  }
+  $candidates = @(@($candidates | Where-Object { -not $_.Alias }) + @($candidates | Where-Object { $_.Alias }))
+
+  $probe = Join-Path $script:Tmp 'ver.py'
+  Set-Content -LiteralPath $probe -Encoding ascii -Value @(
+    'import sys',
+    'print("aim-python %d.%d.%d" % sys.version_info[:3])')
+  $found = ''
+  $ver = ''
+  foreach ($c in $candidates) {
+    # The install manager installs a runtime on demand when one is missing; its own setting
+    # turns that off, so a probe can never install Python.
+    $r = Invoke-Program -File $c.Path -Arguments @($probe) -TimeoutSec 30 `
+      -SetEnv @{ PYTHON_MANAGER_AUTOMATIC_INSTALL = '0' }
+    $m = [regex]::Match([string]$r.Out, 'aim-python (\d+\.\d+\.\d+)')
+    if ($m.Success) { $found = $c.Path; $ver = $m.Groups[1].Value; break }
+  }
+
+  if (-not $candidates -or -not $found) {
+    $evidence = 'не встановлено'
+    if ($candidates.Count -gt 0) { $evidence = 'знайдено, але не запускається' }
+    Add-Record P1 python 'Python' fail $evidence $why $fix
+    Add-SkippedPython 'спершу потрібен Python' @('P2', 'P3', 'P4')
+    return
+  }
+  Add-Record P1 python 'Python' pass (Get-TildePath $found)
+
+  if (Test-VersionAtLeast $ver '3.10') {
+    Add-Record P2 python 'Версія Python' pass $ver
+  } else {
+    Add-Record P2 python 'Версія Python' fail ($ver + ', потрібна 3.10 або новіша') `
+      'Скрипти курсу розраховані на Python 3.10 і новіші.' $fix
+    Add-SkippedPython 'спершу потрібен новіший Python' @('P3', 'P4')
+    return
+  }
+
+  if (-not $script:NetOk) {
+    Add-SkippedPython 'потрібен інтернет' @('P3', 'P4')
+    return
+  }
+  $venv = Join-Path $script:Tmp 'venv'
+  $mk = Invoke-Program -File $found -Arguments @('-m', 'venv', $venv) -TimeoutSec 120
+  $venvPy = Join-Path $venv 'Scripts\python.exe'
+  if ($mk.Code -ne 0 -or -not (Test-Path -LiteralPath $venvPy)) {
+    Add-Record P3 python 'Встановлення бібліотек' fail 'не вдалося створити окреме середовище' `
+      'Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові.'
+    Add-SkippedPython 'спершу мають встановлюватися бібліотеки' @('P4')
+    return
+  }
+  $pipTimeout = 120
+  if ($env:AIM_PIP_TIMEOUT) { $pipTimeout = [int]$env:AIM_PIP_TIMEOUT }
+  $pip = Invoke-Program -File $venvPy -TimeoutSec $pipTimeout `
+    -Arguments @('-m', 'pip', 'install', '--no-cache-dir', '--quiet', '--disable-pip-version-check', 'requests')
+  if ($pip.TimedOut) {
+    Add-Record P3 python 'Встановлення бібліотек' warn 'встановлення не завершилося за відведений час' `
+      'Інтернет працює повільно. Запустіть перевірку ще раз.'
+    Add-SkippedPython 'спершу мають встановлюватися бібліотеки' @('P4')
+    return
+  }
+  if ($pip.Code -ne 0) {
+    Add-Record P3 python 'Встановлення бібліотек' fail 'бібліотека requests не встановилася' `
+      'Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові.'
+    Add-SkippedPython 'спершу мають встановлюватися бібліотеки' @('P4')
+    return
+  }
+  Add-Record P3 python 'Встановлення бібліотек' pass 'бібліотека requests встановилася'
+
+  # The script is UTF-8 on purpose: it must print Ukrainian through a pipe, the thing that
+  # breaks on an old console code page. Its output is decoded as UTF-8 first, then as the
+  # ANSI page, so a working Python passes whichever encoding it chose.
+  $script1 = Join-Path $script:Tmp 't.py'
+  Set-Content -LiteralPath $script1 -Encoding utf8 -Value @(
+    'import requests',
+    'print("Привіт від Python")',
+    'print("HTTPS", requests.head("https://github.com", timeout=10, allow_redirects=True).status_code)')
+  $run = Invoke-Program -File $venvPy -Arguments @($script1) -TimeoutSec 30
+  if ($run.Out -match 'Привіт від Python' -and $run.Out -match 'HTTPS 200') {
+    Add-Record P4 python 'Запуск скрипта' pass 'скрипт надрукував український текст і відкрив сторінку'
+  } elseif ($run.Out -match 'UnicodeEncodeError') {
+    Add-Record P4 python 'Запуск скрипта' fail 'скрипт не зміг надрукувати український текст' `
+      'Ваш Python друкує в старому кодуванні. Команда вмикає UTF-8 для всіх запусків Python.' `
+      @((New-Fix 'setx PYTHONUTF8 1' 'new-window'))
+  } else {
+    Add-Record P4 python 'Запуск скрипта' fail 'скрипт не відпрацював' `
+      'Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові.'
+  }
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 function Write-Line {
