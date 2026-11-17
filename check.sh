@@ -140,6 +140,53 @@ check_system() {
   fi
 }
 
+# ---- Claude Code -----------------------------------------------------------------------
+
+check_claude() {
+  local cli_cmd=0 cli_file=0 found="" ver
+  have claude && cli_cmd=1
+  if [ -e "$HOME/.local/bin/claude" ] || [ -L "$HOME/.local/bin/claude" ]; then cli_file=1; fi
+
+  if [ "$DRIVER" = claude ]; then
+    rec C1 claude "Claude Code" pass "працює (${CLAUDE_CODE_ENTRYPOINT:-claude})"
+  else
+    if [ "$cli_cmd" -eq 1 ] || [ "$cli_file" -eq 1 ]; then found="термінал"; fi
+    if [ -d "$APPS_DIR/Claude.app" ] || [ -d "$HOME/Applications/Claude.app" ]; then
+      found="${found:+$found, }застосунок"
+    fi
+    if ls -d "$HOME"/.vscode/extensions/anthropic.claude-code-* >/dev/null 2>&1; then
+      found="${found:+$found, }VS Code"
+    fi
+    if [ -n "$found" ]; then
+      rec C1 claude "Claude Code" pass "знайдено: $found"
+    else
+      rec C1 claude "Claude Code" fail "не знайдено" \
+        "Встановіть Claude Code за кроком 0 з інструкції. Для термінала вставте цю команду." \
+        "new-window${TAB}curl -fsSL https://claude.ai/install.sh | bash"
+    fi
+  fi
+
+  if [ "$cli_cmd" -eq 1 ]; then
+    ver="$(with_timeout 10 claude --version 2>/dev/null | head -1)"
+    rec C2 claude "Команда claude в терміналі" pass "${ver:-знайдено}"
+    if with_timeout 15 claude auth status >/dev/null 2>&1; then
+      rec C3 claude "Вхід у Claude з термінала" pass "вхід виконано"
+    else
+      rec C3 claude "Вхід у Claude з термінала" warn "вхід не виконано" \
+        "Наберіть claude у терміналі та увійдіть у свій обліковий запис у браузері." \
+        "browser${TAB}claude"
+    fi
+  elif [ "$cli_file" -eq 1 ]; then
+    rec C2 claude "Команда claude в терміналі" fail "Claude встановлено, але термінал не бачить команду" \
+      "Термінал шукає програми у списку папок PATH. Команда додає туди папку з Claude." \
+      "new-window${TAB}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+    rec C3 claude "Вхід у Claude з термінала" skip "спершу потрібна команда claude"
+  else
+    rec C2 claude "Команда claude в терміналі" info "термінальну версію не встановлено; для застосунку і VS Code вона не потрібна"
+    rec C3 claude "Вхід у Claude з термінала" info "без термінальної версії не перевіряється"
+  fi
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 mark() {

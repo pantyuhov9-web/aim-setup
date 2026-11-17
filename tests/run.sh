@@ -210,6 +210,75 @@ exit 0'
   teardown
 }
 
+test_healthy_claude() {
+  setup
+  run_check -- --json
+  ok "claude: C1 passes" has_status C1 pass
+  ok "claude: C2 passes" has_status C2 pass
+  ok "claude: C3 passes" has_status C3 pass
+  teardown
+}
+
+test_no_claude_anywhere_fails() {
+  setup
+  rm "$BIN/claude"
+  run_check -- --json
+  ok "no Claude: C1 fails" has_status C1 fail
+  ok "no Claude: C2 is info" has_status C2 info
+  ok "no Claude: prints Anthropic's installer" contains "curl -fsSL https://claude.ai/install.sh | bash"
+  teardown
+}
+
+test_desktop_app_alone_is_enough() {
+  setup
+  rm "$BIN/claude"
+  mkdir -p "$APPS/Claude.app"
+  run_check -- --json
+  ok "desktop only: C1 passes" has_status C1 pass
+  ok "desktop only: C2 is info, not a failure" has_status C2 info
+  ok "desktop only: C3 is info, not a failure" has_status C3 info
+  ok "desktop only: exit code 0" rc_is 0
+  teardown
+}
+
+test_vscode_extension_alone_is_enough() {
+  setup
+  rm "$BIN/claude"
+  mkdir -p "$HOME_DIR/.vscode/extensions/anthropic.claude-code-2.1.300"
+  run_check -- --json
+  ok "VS Code only: C1 passes" has_status C1 pass
+  teardown
+}
+
+test_cli_installed_but_not_in_path() {
+  setup
+  rm "$BIN/claude"
+  mkdir -p "$HOME_DIR/.local/bin"
+  touch "$HOME_DIR/.local/bin/claude"
+  run_check -- --json
+  ok "PATH: C2 fails" has_status C2 fail
+  ok "PATH: prints the zshrc fix" contains '>> ~/.zshrc'
+  ok "PATH: asks for a new window" contains "відкрийте нове вікно термінала"
+  teardown
+}
+
+test_claude_logged_out_warns() {
+  setup
+  run_check STUB_CLAUDE_AUTH_RC=1 -- --json
+  ok "logged out: C3 warns" has_status C3 warn
+  ok "logged out: exit code stays 0" rc_is 0
+  teardown
+}
+
+test_claude_mode_passes_by_construction() {
+  setup
+  rm "$BIN/claude"
+  run_check CLAUDECODE=1 CLAUDE_CODE_ENTRYPOINT=claude-desktop
+  ok "Claude mode: C1 passes by construction" has_status C1 pass
+  ok "Claude mode: names the surface" contains "claude-desktop"
+  teardown
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 for t in $(declare -F | cut -d' ' -f3 | grep '^test_'); do "$t"; done
