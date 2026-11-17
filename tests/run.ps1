@@ -291,6 +291,93 @@ function Test-AimTruncatedDownloadRunsNothing {
   Remove-Machine
 }
 
+function Test-AimHealthySystem {
+  New-Machine
+  Invoke-Check -Switches @('-Json')
+  Write-Ok 'system: S1 passes' (Test-Status S1 'pass')
+  Write-Ok 'system: S2 passes' (Test-Status S2 'pass')
+  Write-Ok 'system: S3 passes' (Test-Status S3 'pass')
+  Write-Ok 'system: S4 passes' (Test-Status S4 'pass')
+  Write-Ok 'system: S5 passes' (Test-Status S5 'pass')
+  Write-Ok 'system: S6 is info' (Test-Status S6 'info')
+  Write-Ok 'system: names the build' (Test-Text 'збірка 26100')
+  Remove-Machine
+}
+
+function Test-AimOldWindowsFails {
+  New-Machine
+  Invoke-Check -Environment @{ AIM_TEST_BUILD = '17134' } -Switches @('-Json')
+  Write-Ok 'old Windows: S1 fails' (Test-Status S1 'fail')
+  Write-Ok 'old Windows: exit code 1' ($script:Rc -eq 1)
+  Write-Ok 'old Windows: named as missing' (Test-Text 'Не вистачає: система.')
+  Write-Ok 'old Windows: points at Windows Update' (Test-Text 'Windows Update')
+  Remove-Machine
+}
+
+function Test-AimThirtyTwoBitWindowFails {
+  New-Machine
+  Invoke-Check -Environment @{ AIM_TEST_ARCH = 'proc32' } -Switches @('-Json')
+  Write-Ok '32-bit window: S2 fails' (Test-Status S2 'fail')
+  Write-Ok '32-bit window: names the window to open' (Test-Text '«Windows PowerShell (x86)»')
+  Write-Ok '32-bit window: exit code 1' ($script:Rc -eq 1)
+  Remove-Machine
+}
+
+function Test-AimThirtyTwoBitWindowsFails {
+  New-Machine
+  Invoke-Check -Environment @{ AIM_TEST_ARCH = 'os32' } -Switches @('-Json')
+  Write-Ok '32-bit Windows: S2 fails' (Test-Status S2 'fail')
+  Write-Ok '32-bit Windows: says the system is 32-bit' (Test-Text '32-розрядна Windows')
+  Remove-Machine
+}
+
+function Test-AimLowMemoryWarnsWithoutFailing {
+  New-Machine
+  Invoke-Check -Environment @{ AIM_TEST_MEM = '2147483648' } -Switches @('-Json')
+  Write-Ok 'low memory: S3 warns' (Test-Status S3 'warn')
+  Write-Ok 'low memory: exit code stays 0' ($script:Rc -eq 0)
+  Remove-Machine
+}
+
+function Test-AimCyrillicHomeFolderWarns {
+  New-Machine
+  $cyr = Join-Path $script:W 'home\Олена'
+  New-Item -ItemType Directory -Path $cyr -Force | Out-Null
+  Invoke-Check -Environment @{ USERPROFILE = $cyr } -Switches @('-Json')
+  Write-Ok 'cyrillic home: S4 warns' (Test-Status S4 'warn')
+  Write-Ok 'cyrillic home: names the cause' (Test-Text 'є кириличні літери')
+  Write-Ok 'cyrillic home: the folder name itself is not printed' (Test-NoText 'Олена')
+  Write-Ok 'cyrillic home: exit code stays 0' ($script:Rc -eq 0)
+  Remove-Machine
+}
+
+function Test-AimSpaceInHomeFolderWarns {
+  New-Machine
+  $spaced = Join-Path $script:W 'home\Olena Test'
+  New-Item -ItemType Directory -Path $spaced -Force | Out-Null
+  Invoke-Check -Environment @{ USERPROFILE = $spaced } -Switches @('-Json')
+  Write-Ok 'spaced home: S4 warns' (Test-Status S4 'warn')
+  Write-Ok 'spaced home: names the cause' (Test-Text 'є пробіл')
+  Remove-Machine
+}
+
+function Test-AimNoNetworkWarns {
+  New-Machine
+  Invoke-Check -Environment @{ AIM_TEST_NET = 'down:github.com,pypi.org,claude.ai' } -Switches @('-Json')
+  Write-Ok 'no network: S5 warns' (Test-Status S5 'warn')
+  Write-Ok 'no network: names the silent hosts' (Test-Text 'немає відповіді від: github.com pypi.org claude.ai')
+  Write-Ok 'no network: exit code stays 0' ($script:Rc -eq 0)
+  Remove-Machine
+}
+
+function Test-AimUnsupportedRegionIsNamed {
+  New-Machine
+  Invoke-Check -Environment @{ AIM_TEST_NET = 'region' } -Switches @('-Json')
+  Write-Ok 'region: S5 warns' (Test-Status S5 'warn')
+  Write-Ok 'region: explains the VPN' (Test-Text 'VPN')
+  Remove-Machine
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 Initialize-Stub

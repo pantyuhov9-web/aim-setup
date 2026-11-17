@@ -206,6 +206,92 @@ function Test-Reachable {
   }
 }
 
+# ---- system ----------------------------------------------------------------------------
+
+function Invoke-SystemChecks {
+  $build = Get-VersionDigits $env:AIM_TEST_BUILD
+  if ($build -eq 0) { $build = [Environment]::OSVersion.Version.Build }
+  if ($build -ge 17763) {
+    Add-Record S1 system 'Версія Windows' pass ('Windows, збірка ' + $build)
+  } else {
+    Add-Record S1 system 'Версія Windows' fail ('збірка ' + $build + ', потрібна 17763 або новіша') `
+      'Claude Code працює на Windows 10 версії 1809 і новіших. Оновіть систему: «Параметри», «Windows Update».'
+  }
+
+  $osIs64 = [Environment]::Is64BitOperatingSystem
+  $procIs64 = [Environment]::Is64BitProcess
+  if ($env:AIM_TEST_ARCH -eq 'os32') { $osIs64 = $false; $procIs64 = $false }
+  if ($env:AIM_TEST_ARCH -eq 'proc32') { $procIs64 = $false }
+  if (-not $osIs64) {
+    Add-Record S2 system 'Розрядність' fail '32-розрядна Windows' `
+      'Claude Code працює лише на 64-розрядній Windows. Цей компʼютер потребує заміни або перевстановлення системи.'
+  } elseif (-not $procIs64) {
+    Add-Record S2 system 'Розрядність' fail 'відкрито 32-розрядне вікно PowerShell' `
+      'Ви відкрили «Windows PowerShell (x86)». Claude Code у ньому не працює. Закрийте це вікно, відкрийте «Windows PowerShell» без позначки (x86) і запустіть перевірку ще раз.'
+  } else {
+    Add-Record S2 system 'Розрядність' pass '64-розрядна Windows, 64-розрядне вікно'
+  }
+
+  $mem = 0
+  if ($env:AIM_TEST_MEM) {
+    $mem = [double]$env:AIM_TEST_MEM
+  } else {
+    try { $mem = [double](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch { $mem = 0 }
+  }
+  $gb = [math]::Floor($mem / 1073741824)
+  if ($mem -ge 4294967296) {
+    Add-Record S3 system 'Оперативна памʼять' pass ($gb.ToString() + ' ГБ')
+  } else {
+    Add-Record S3 system 'Оперативна памʼять' warn ($gb.ToString() + ' ГБ, Claude Code потребує щонайменше 4 ГБ') `
+      'На цьому компʼютері Claude Code працюватиме повільно.'
+  }
+
+  # The evidence names what is wrong with the path, never the path itself: it holds the user name.
+  $profile1 = [string]$env:USERPROFILE
+  $leaf = ''
+  if ($profile1) { $leaf = Split-Path $profile1 -Leaf }
+  if ($leaf -match '^[A-Za-z0-9._-]+$') {
+    Add-Record S4 system 'Шлях до вашої папки' pass 'лише латинські літери й цифри'
+  } else {
+    $what = 'є символи, відмінні від латинських літер і цифр'
+    if ($leaf -match '\s') { $what = 'є пробіл' }
+    if ($leaf -match '[Ѐ-ӿ]') { $what = 'є кириличні літери' }
+    Add-Record S4 system 'Шлях до вашої папки' warn ('у назві папки користувача ' + $what) `
+      'Claude Code і деякі його розширення збиваються на таких шляхах: губиться історія сесій, частина розширень не запускається. Автоматичного виправлення немає. Якщо щось почне ламатися, напишіть кураторові: робочий обхід — новий користувач Windows з латинською назвою.'
+  }
+
+  $bad = @()
+  $region = $false
+  $script:NetOk = $true
+  foreach ($h in 'https://github.com', 'https://pypi.org') {
+    if (-not (Test-Reachable $h).Ok) { $bad += ($h -replace '^https://', '') }
+  }
+  $claude = Test-Reachable 'https://claude.ai/install.ps1'
+  if (-not $claude.Ok -or -not $claude.Body) {
+    $bad += 'claude.ai'
+  } elseif ($claude.Body -match 'App unavailable in region') {
+    $region = $true
+  }
+  if ($region) {
+    Add-Record S5 system 'Інтернет' warn 'claude.ai відповідає, що сервіс недоступний у цій країні' `
+      'Claude не працює в цій країні або через цей VPN. Вимкніть VPN чи змініть у ньому країну і запустіть перевірку ще раз.'
+  } elseif ($bad.Count -gt 0) {
+    $script:NetOk = $false
+    Add-Record S5 system 'Інтернет' warn ('немає відповіді від: ' + ($bad -join ' ')) `
+      'Перевірте підключення до інтернету і запустіть перевірку ще раз.'
+  } else {
+    Add-Record S5 system 'Інтернет' pass 'github.com, pypi.org і claude.ai відповідають'
+  }
+
+  $script:HasWinget = Test-Have 'winget'
+  if ($script:HasWinget) {
+    Add-Record S6 system 'winget' info 'знайдено: встановлення програм піде через нього'
+  } else {
+    Add-Record S6 system 'winget' info 'не знайдено: виправлення покажуть сторінки для завантаження' `
+      'winget входить до «Установника програм» з Microsoft Store. Оновіть його в Store, щоб встановлювати програми однією командою.'
+  }
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 function Write-Line {
