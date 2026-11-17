@@ -312,6 +312,19 @@ test_git_identity_missing() {
   teardown
 }
 
+test_git_identity_left_as_the_sample_fails() {
+  # The fix prints a sample name and a sample e-mail. Pasted as they are, they must not pass.
+  setup
+  run_check "STUB_GIT_NAME=Імʼя Прізвище" -- --json
+  ok "sample name: G3 fails" has_status G3 fail
+  ok "sample name: says it is the sample" contains "вказано зразок"
+  teardown
+  setup
+  run_check STUB_GIT_EMAIL=you@example.com -- --json
+  ok "sample e-mail: G3 fails" has_status G3 fail
+  teardown
+}
+
 test_gh_missing_uses_homebrew_when_present() {
   setup
   rm "$BIN/gh"

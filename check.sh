@@ -224,7 +224,8 @@ push_test() { # prints the repo name on success, a reason on failure; returns 2 
 }
 
 check_git() {
-  local gitp ver name email helper other fix out
+  local gitp ver name email helper other fix out why
+  local sample_name="Імʼя Прізвище" sample_email="you@example.com"
   CLT=0
   xcode-select -p >/dev/null 2>&1 </dev/null && CLT=1
 
@@ -241,12 +242,15 @@ check_git() {
   if passed G1; then
     name="$(git config --global user.name 2>/dev/null </dev/null)"
     email="$(git config --global user.email 2>/dev/null </dev/null)"
-    if [ -n "$name" ] && [ -n "$email" ]; then
-      rec G3 github "Імʼя та пошта в Git" pass "вказано"
+    why="Git підписує кожне збереження іменем і поштою. Підставте в лапках свої; пошта та сама, що в обліковому записі GitHub."
+    fix="-${TAB}git config --global user.name \"$sample_name\"${NL}-${TAB}git config --global user.email \"$sample_email\""
+    if [ -z "$name" ] || [ -z "$email" ]; then
+      rec G3 github "Імʼя та пошта в Git" fail "не вказано" "$why" "$fix"
+    elif [ "$name" = "$sample_name" ] || [ "$email" = "$sample_email" ]; then
+      # The two commands above were pasted without putting real values into the quotes.
+      rec G3 github "Імʼя та пошта в Git" fail "вказано зразок з підказки, а не ваші дані" "$why" "$fix"
     else
-      rec G3 github "Імʼя та пошта в Git" fail "не вказано" \
-        "Git підписує кожне збереження іменем і поштою. Підставте в лапках свої; пошта та сама, що в обліковому записі GitHub." \
-        "-${TAB}git config --global user.name \"Імʼя Прізвище\"${NL}-${TAB}git config --global user.email \"you@example.com\""
+      rec G3 github "Імʼя та пошта в Git" pass "вказано"
     fi
   else
     rec G3 github "Імʼя та пошта в Git" skip "спершу потрібен Git"
