@@ -9,19 +9,33 @@ macOS, in Terminal:
 
     curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash
 
-Windows: in preparation.
+Windows, in the window that Win+R and `cmd` opens (the same line works in PowerShell and in Git Bash):
+
+    powershell -NoProfile -Command "irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1 | iex"
 
 The check is read-only. It installs nothing and leaves nothing behind. It prints what works,
 what is missing, and the command that fixes each missing piece. The report is in Ukrainian.
 
-| Switch | Effect |
-|---|---|
-| `--json` | Also prints the records as JSON between `=== aim-check json ===` and `=== end json ===` |
-| `--push-test` | Creates or reuses a private repo `aim-setup-check` in your GitHub account and pushes one file to it. This is the only step that writes anywhere. |
+| Switch | macOS | Windows | Effect |
+|---|---|---|---|
+| JSON | `--json` | `-Json` | Also prints the records as JSON between `=== aim-check json ===` and `=== end json ===` |
+| Push test | `--push-test` | `-PushTest` | Creates or reuses a private repo `aim-setup-check` in your GitHub account and pushes one file to it. This is the only step that writes anywhere. |
 
 Pass a switch through the pipe like this:
 
     curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash -s -- --push-test
+
+    powershell -NoProfile -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1))) -PushTest"
+
+On Windows the report is written as UTF-8 bytes whenever the output is redirected, because the
+console code page of a Ukrainian PC often has no Cyrillic. To capture it to a file, redirect the
+process — `powershell -NoProfile -Command "..." > report.txt` — and not a PowerShell pipeline.
+
+`check.ps1` is made to be fetched and run as a string, and it is not a file to run: Windows
+PowerShell 5.1 reads a script file without a byte-order mark as the system code page, which
+mangles the Ukrainian text in it. The mark is not an option either — it survives the download as
+one character and `iex` then fails on the first token. Tooling reads the file as UTF-8 text
+instead; `tests\run.ps1` shows both forms.
 
 When Claude Code runs the check, the report also carries the JSON block and a short procedure
 that tells Claude how to fix what failed. The checker knows Claude is running it because
@@ -29,27 +43,32 @@ Claude Code sets `CLAUDECODE=1` for the commands it starts.
 
 ## What it checks
 
-| Id | Check |
-|---|---|
-| S1 | macOS 13 or later |
-| S2 | Processor (information only) |
-| S3 | 4 GB of memory or more |
-| S5 | github.com, pypi.org and claude.ai answer |
-| C1 | Claude Code is present: the terminal version, the desktop app or the VS Code extension |
-| C2 | The `claude` command is found in the terminal |
-| C3 | The terminal version is signed in |
-| G1 | Git runs |
-| G3 | Git has a name and an e-mail, and they are not the sample ones from the fix |
-| G4 | GitHub CLI runs |
-| G5 | GitHub CLI is signed in |
-| G6 | Git uses that sign-in |
-| G7 | A real push to GitHub works (only with `--push-test`) |
-| P1 | Python runs |
-| P2 | Python is 3.10 or later |
-| P3 | A package installs into a fresh virtual environment |
-| P4 | A script prints Ukrainian text and opens an HTTPS page |
+| Id | macOS | Windows |
+|---|---|---|
+| S1 | macOS 13 or later | Windows build 17763 or later |
+| S2 | Processor (information only) | 64-bit Windows and a 64-bit window |
+| S3 | 4 GB of memory or more | the same |
+| S4 | — | the user folder's name is Latin letters and digits |
+| S5 | github.com, pypi.org and claude.ai answer | the same |
+| S6 | — | winget is present (information only) |
+| C1 | Claude Code is present: the terminal version, the desktop app or the VS Code extension | the same |
+| C2 | The `claude` command is found in the terminal | the same |
+| C3 | The terminal version is signed in | the same |
+| C4 | — | the `claude` command is not shadowed by the desktop app |
+| G1 | Git runs | the same |
+| G2 | — | Git Bash came with Git |
+| G3 | Git has a name and an e-mail, and they are not the sample ones from the fix | the same |
+| G4 | GitHub CLI runs | the same |
+| G5 | GitHub CLI is signed in | the same |
+| G6 | Git uses that sign-in | the same, and Git Credential Manager counts as a route |
+| G7 | A real push to GitHub works (only with the push-test switch) | the same |
+| P1 | Python runs | the same, and a Store alias is probed only after a real Python |
+| P2 | Python is 3.10 or later | the same |
+| P3 | A package installs into a fresh virtual environment | the same |
+| P4 | A script prints Ukrainian text and opens an HTTPS page | the same |
 
-The ids S4, S6, C4 and G2 belong to the Windows checker.
+The record order is the order of this table, skipping the dashes: seventeen records on macOS,
+twenty-one on Windows.
 
 ## The contract
 
@@ -73,5 +92,13 @@ Every check produces one record:
 
     /bin/bash tests/run.sh
 
+    powershell -NoProfile -File tests\run.ps1
+
 The tests are hermetic: every external command is a stub, so they need no network and no
-GitHub account. The checker must keep running on `/bin/bash` 3.2, the bash that ships with macOS.
+GitHub account. `tests\run.ps1 -Only <text>` runs one group while working on it.
+
+Two rules the checkers must keep. `check.sh` runs on `/bin/bash` 3.2, the bash that ships with
+macOS: no associative arrays. `check.ps1` runs on Windows PowerShell 5.1, the version built into
+Windows: no PowerShell 7 syntax, no `exit`, and the file carries no byte-order mark, because it
+is fetched and run as a string. `tests\run.ps1` does carry one, since 5.1 reads a file without
+it as the system code page and the tests compare Ukrainian strings.

@@ -15,6 +15,14 @@ jobs:
           persist-credentials: false
       - name: shellcheck, pinned to the version the code was written against
         run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck -s bash check.sh tests/run.sh
+      - name: check.ps1 is servable as a string, so it carries no byte-order mark
+        run: |
+          head -c 3 check.ps1 | od -An -tx1 | tr -d ' \n' > mark.txt
+          test "$(cat mark.txt)" != "efbbbf"
+      - name: The guide's two commands are the ones the checkers print
+        run: |
+          grep -qF 'curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash' README.md
+          grep -qF 'powershell -NoProfile -Command "irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1 | iex"' README.md
   macos:
     runs-on: macos-latest
     timeout-minutes: 15
@@ -44,3 +52,69 @@ jobs:
           assert all(r["status"] in {"pass", "warn", "fail", "info", "skip"} for r in records)
           print("real run:", len(records), "records, every status valid")
           PY
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        # Windows PowerShell 5.1 is the version students have; pwsh would hide its traps.
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: The built-in PowerShell is the one students get
+        run: $PSVersionTable.PSVersion.ToString()
+      - name: PSScriptAnalyzer, pinned to the version the code was written against
+        # check.ps1 is analyzed from text decoded as UTF-8, because it carries no byte-order mark
+        # and -Path would read it as the system code page and report mangled strings as errors.
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser -AllowClobber
+          $text = [System.IO.File]::ReadAllText("$PWD\check.ps1", [System.Text.Encoding]::UTF8)
+          $found = @(Invoke-ScriptAnalyzer -ScriptDefinition $text -Severity Error, Warning)
+          $found += @(Invoke-ScriptAnalyzer -Path tests\run.ps1 -Severity Error, Warning)
+          $found | Format-Table RuleName, Line, Message -AutoSize | Out-String
+          if ($found.Count -gt 0) { throw ($found.Count.ToString() + ' finding(s)') }
+      - name: Hermetic tests on the built-in PowerShell
+        run: .\tests\run.ps1
+      - name: Real run, read and executed the way a student runs it
+        # The report is captured by redirecting the process, not the pipeline: when its output
+        # is redirected the checker writes UTF-8 bytes to the process's own output stream.
+        run: |
+          $command = '& ([scriptblock]::Create((Get-Content -Raw -Encoding UTF8 ''check.ps1''))) -Json'
+          $p = Start-Process -FilePath powershell -NoNewWindow -PassThru -Wait `
+            -ArgumentList @('-NoProfile', '-Command', ('"' + $command + '"')) `
+            -RedirectStandardOutput report.txt -RedirectStandardError report.err
+          Get-Content report.txt -Encoding UTF8 | Select-Object -First 30
+          Get-Content report.err -Encoding UTF8
+      - name: The real run printed Ukrainian text, not question marks
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes("$PWD\report.txt")
+          if (-not ($bytes[0] -eq 0xD0 -and $bytes[1] -eq 0x9F)) { throw 'the report did not start with UTF-8 Cyrillic' }
+      - name: The real run printed every record as valid JSON
+        run: |
+          $text = [System.IO.File]::ReadAllText("$PWD\report.txt", [System.Text.Encoding]::UTF8)
+          $json = [regex]::Match($text, '(?s)=== aim-check json ===\r?\n(.*?)=== end json ===').Groups[1].Value
+          $records = $json | ConvertFrom-Json
+          $want = 'S1,S2,S3,S4,S5,S6,C1,C2,C3,C4,G1,G2,G3,G4,G5,G6,G7,P1,P2,P3,P4'
+          $ids = ($records | ForEach-Object { $_.id }) -join ','
+          if ($ids -ne $want) { throw $ids }
+          $allowed = 'pass', 'warn', 'fail', 'info', 'skip'
+          foreach ($r in $records) { if ($allowed -notcontains $r.status) { throw ($r.id + ' ' + $r.status) } }
+          Write-Host ('real run: ' + $records.Count + ' records, every status valid')
+      - name: The same file also runs when PowerShell 7 is what the student pasted into
+        # The printed command names powershell, which is always 5.1, but a student who already
+        # lives in pwsh will paste into that. Nothing here may depend on the older version only.
+        shell: pwsh
+        run: |
+          $command = '& ([scriptblock]::Create((Get-Content -Raw -Encoding UTF8 ''check.ps1''))) -Json'
+          $p = Start-Process -FilePath pwsh -NoNewWindow -PassThru -Wait `
+            -ArgumentList @('-NoProfile', '-Command', ('"' + $command + '"')) `
+            -RedirectStandardOutput seven.txt -RedirectStandardError seven.err
+          $text = [System.IO.File]::ReadAllText("$PWD/seven.txt", [System.Text.Encoding]::UTF8)
+          Get-Content seven.err
+          if ($text -notmatch 'aim-check windows') { throw 'no report on PowerShell 7' }
+          $json = [regex]::Match($text, '(?s)=== aim-check json ===\r?\n(.*?)=== end json ===').Groups[1].Value
+          $records = $json | ConvertFrom-Json
+          if ($records.Count -ne 21) { throw ('records: ' + $records.Count) }
+          Write-Host ('PowerShell 7: ' + $records.Count + ' records')
