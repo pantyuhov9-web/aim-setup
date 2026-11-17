@@ -144,6 +144,8 @@ test_claude_mode_adds_json_and_procedure() {
   ok "Claude mode: JSON block without the switch" contains "=== aim-check json ==="
   ok "Claude mode: procedure printed" contains "=== порядок дій для Claude ==="
   ok "Claude mode: procedure carries the push-test command" contains "bash -s -- --push-test"
+  ok "Claude mode: the procedure fixes failures only" contains "тільки пункти зі статусом fail"
+  ok "Claude mode: warnings are explained, their commands are not run" contains "їхніх команд не виконуй"
   teardown
 }
 
@@ -399,6 +401,11 @@ test_push_test_runs_when_the_helper_is_only_a_warning() {
   setup
   run_check STUB_HELPER= -- --json --push-test
   ok "push with a warning: G7 passes" has_status G7 pass
+  # A push that went through proves the sign-in route that G6 could not see into.
+  ok "push with a warning: the passed push settles G6" has_status G6 pass
+  ok "push with a warning: names the route that works" contains "працює через osxkeychain"
+  ok "push with a warning: says everything works" contains "Усе потрібне працює."
+  ok "push with a warning: no fix section" lacks "Як виправити"
   teardown
 }
 
