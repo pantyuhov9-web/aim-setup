@@ -449,7 +449,7 @@ group_name() {
 }
 
 print_report() {
-  local i missing="" warns=0 g step=0 flag cmd how="запуск із термінала"
+  local i missing="" warns=0 unchecked=0 g step=0 flag cmd how="запуск із термінала"
   [ "$DRIVER" = claude ] && how="запуск через Claude"
   printf '%s\n\n' "Перевірка компʼютера для курсу A&I Mastery (macOS, $how)"
   i=0
@@ -460,12 +460,19 @@ print_report() {
       case ", $missing," in *", $g,"*) ;; *) missing="${missing:+$missing, }$g" ;; esac
     fi
     [ "${R_STATUS[$i]}" = warn ] && warns=$((warns + 1))
+    # A check that was skipped proves nothing. The push test left switched off is the one
+    # skip that is a choice, not a gap.
+    if [ "${R_STATUS[$i]}" = skip ] && { [ "${R_ID[$i]}" != G7 ] || [ "$PUSH_TEST" -eq 1 ]; }; then
+      unchecked=$((unchecked + 1))
+    fi
     i=$((i + 1))
   done
 
   printf '\n'
   if [ -n "$missing" ]; then
     printf '%s\n' "Не вистачає: $missing."
+  elif [ "$unchecked" -gt 0 ]; then
+    printf '%s\n' "Не все вдалося перевірити. Пропущені пункти позначені [--]."
   elif [ "$warns" -gt 0 ]; then
     printf '%s\n' "Головне працює. Є зауваження, вони позначені [! ]."
   else

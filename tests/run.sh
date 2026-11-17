@@ -380,6 +380,18 @@ test_push_test_passes() {
   run_check -- --json --push-test
   ok "push test: G7 passes" has_status G7 pass
   ok "push test: exit code 0" rc_is 0
+  ok "push test: says everything works" contains "Усе потрібне працює."
+  teardown
+}
+
+test_skipped_checks_are_not_summarised_as_working() {
+  # Without a network nothing fails, but the GitHub sign-in and the Python packages were
+  # never checked. The summary must say that, not that the main things work.
+  setup
+  run_check STUB_CURL_RC=6 -- --json
+  ok "unchecked: exit code stays 0" rc_is 0
+  ok "unchecked: the summary says so" contains "Не все вдалося перевірити. Пропущені пункти позначені [--]."
+  ok "unchecked: the summary does not claim that the main things work" lacks "Головне працює"
   teardown
 }
 
@@ -493,6 +505,7 @@ test_slow_network_makes_packages_a_warning() {
   took=$(( $(date +%s) - started ))
   ok "slow network: P3 warns" has_status P3 warn
   ok "slow network: P4 skipped" has_status P4 skip
+  ok "slow network: the summary says not everything was checked" contains "Не все вдалося перевірити."
   ok "slow network: exit code stays 0" rc_is 0
   ok "slow network: the hanging install was stopped" test "$took" -le 15
   teardown
