@@ -97,6 +97,11 @@ Every check produces one record:
 The tests are hermetic: every external command is a stub, so they need no network and no
 GitHub account. `tests\run.ps1 -Only <text>` runs one group while working on it.
 
+Continuous integration also runs PSScriptAnalyzer 1.25.0 with `tests\analyzer.psd1`, which says
+which rule families do not apply here and why. To run it the same way locally:
+
+    Invoke-ScriptAnalyzer -ScriptDefinition ([IO.File]::ReadAllText("$PWD\check.ps1", [Text.Encoding]::UTF8)) -Severity Error, Warning -Settings .\tests\analyzer.psd1
+
 Two rules the checkers must keep. `check.sh` runs on `/bin/bash` 3.2, the bash that ships with
 macOS: no associative arrays. `check.ps1` runs on Windows PowerShell 5.1, the version built into
 Windows: no PowerShell 7 syntax, no `exit`, and the file carries no byte-order mark, because it
