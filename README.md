@@ -39,7 +39,7 @@ Claude Code sets `CLAUDECODE=1` for the commands it starts.
 | C2 | The `claude` command is found in the terminal |
 | C3 | The terminal version is signed in |
 | G1 | Git runs |
-| G3 | Git has a name and an e-mail |
+| G3 | Git has a name and an e-mail, and they are not the sample ones from the fix |
 | G4 | GitHub CLI runs |
 | G5 | GitHub CLI is signed in |
 | G6 | Git uses that sign-in |
