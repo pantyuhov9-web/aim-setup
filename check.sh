@@ -94,6 +94,52 @@ json_esc() { # escape backslash and double quote; the strings here hold no contr
   printf '%s' "$s"
 }
 
+# ---- system ----------------------------------------------------------------------------
+
+check_system() {
+  local v major arch mem gb bad body region
+  v="$(sw_vers -productVersion 2>/dev/null </dev/null)"
+  major="$(digits "${v%%.*}")"
+  if [ "$major" -ge 13 ]; then
+    rec S1 system "Версія macOS" pass "macOS $v"
+  else
+    rec S1 system "Версія macOS" fail "macOS ${v:-невідома}, потрібна 13 або новіша" \
+      "Claude Code працює на macOS 13 і новіших. Оновіть систему: меню Apple, «Системні параметри», «Оновлення ПЗ»."
+  fi
+
+  arch="$(uname -m 2>/dev/null)"
+  rec S2 system "Процесор" info "${arch:-невідомий}"
+
+  mem="$(digits "$(sysctl -n hw.memsize 2>/dev/null </dev/null)")"
+  gb=$((mem / 1073741824))
+  if [ "$mem" -ge 4294967296 ]; then
+    rec S3 system "Оперативна памʼять" pass "$gb ГБ"
+  else
+    rec S3 system "Оперативна памʼять" warn "$gb ГБ, Claude Code потребує щонайменше 4 ГБ" \
+      "На цьому компʼютері Claude Code працюватиме повільно."
+  fi
+
+  bad=""; region=0; NET_OK=1
+  curl -fsS -o /dev/null --max-time 10 https://github.com </dev/null 2>/dev/null || bad="$bad github.com"
+  curl -fsS -o /dev/null --max-time 10 https://pypi.org </dev/null 2>/dev/null || bad="$bad pypi.org"
+  body="$(curl -fsSL --max-time 10 https://claude.ai/install.sh </dev/null 2>/dev/null | head -c 4000)"
+  if [ -z "$body" ]; then
+    bad="$bad claude.ai"
+  elif printf '%s' "$body" | grep -q "App unavailable in region"; then
+    region=1
+  fi
+  if [ "$region" -eq 1 ]; then
+    rec S5 system "Інтернет" warn "claude.ai відповідає, що сервіс недоступний у цій країні" \
+      "Claude не працює в цій країні або через цей VPN. Вимкніть VPN чи змініть у ньому країну і запустіть перевірку ще раз."
+  elif [ -n "$bad" ]; then
+    NET_OK=0
+    rec S5 system "Інтернет" warn "немає відповіді від:$bad" \
+      "Перевірте підключення до інтернету і запустіть перевірку ще раз."
+  else
+    rec S5 system "Інтернет" pass "github.com, pypi.org і claude.ai відповідають"
+  fi
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 mark() {

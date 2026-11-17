@@ -162,6 +162,54 @@ test_truncated_download_runs_nothing() {
   teardown
 }
 
+test_healthy_system() {
+  setup
+  run_check -- --json
+  ok "system: S1 passes" has_status S1 pass
+  ok "system: S2 is info" has_status S2 info
+  ok "system: S3 passes" has_status S3 pass
+  ok "system: S5 passes" has_status S5 pass
+  ok "system: shows the version" contains "macOS 15.3"
+  teardown
+}
+
+test_old_macos_fails() {
+  setup
+  stub sw_vers 'echo 12.7.6'
+  run_check -- --json
+  ok "old macOS: S1 fails" has_status S1 fail
+  ok "old macOS: exit code 1" rc_is 1
+  ok "old macOS: named as missing" contains "Не вистачає: система."
+  teardown
+}
+
+test_low_memory_warns_without_failing() {
+  setup
+  stub sysctl 'echo 2147483648'
+  run_check -- --json
+  ok "low memory: S3 warns" has_status S3 warn
+  ok "low memory: exit code stays 0" rc_is 0
+  teardown
+}
+
+test_no_network_warns() {
+  setup
+  run_check STUB_CURL_RC=6 -- --json
+  ok "no network: S5 warns" has_status S5 warn
+  ok "no network: names the silent hosts" contains "немає відповіді від: github.com pypi.org claude.ai"
+  teardown
+}
+
+test_unsupported_region_is_named() {
+  setup
+  stub curl 'case "$*" in *claude.ai*) echo "<html>App unavailable in region</html>" ;; esac
+exit 0'
+  run_check -- --json
+  ok "region: S5 warns" has_status S5 warn
+  ok "region: explains the VPN" contains "VPN"
+  teardown
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 for t in $(declare -F | cut -d' ' -f3 | grep '^test_'); do "$t"; done
