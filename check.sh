@@ -312,6 +312,96 @@ check_git() {
   fi
 }
 
+# ---- Python ----------------------------------------------------------------------------
+
+skip_python_rest() { # reason, then the ids to skip
+  local reason="$1" id title
+  shift
+  for id in "$@"; do
+    case "$id" in
+      P2) title="Версія Python" ;;
+      P3) title="Встановлення бібліотек" ;;
+      *) title="Запуск скрипта" ;;
+    esac
+    rec "$id" python "$title" skip "$reason"
+  done
+}
+
+check_python() {
+  local pyp ver fix venv out rc
+  if have brew; then
+    fix="new-window${TAB}brew install python"
+  else
+    fix="-${TAB}curl -LsSf https://astral.sh/uv/install.sh | sh${NL}new-window${TAB}~/.local/bin/uv python install --default"
+  fi
+
+  pyp="$(command -v python3 2>/dev/null)"
+  if [ -z "$pyp" ] || { [ "$pyp" = "$SHIM_DIR/python3" ] && [ "$CLT" -eq 0 ]; }; then
+    rec P1 python "Python" fail "не встановлено" "Python запускає скрипти з уроків." "$fix"
+    skip_python_rest "спершу потрібен Python" P2 P3 P4
+    return 0
+  fi
+  ver="$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null </dev/null)"
+  if [ -z "$ver" ]; then
+    rec P1 python "Python" fail "знайдено, але не запускається" "Python запускає скрипти з уроків." "$fix"
+    skip_python_rest "спершу потрібен Python" P2 P3 P4
+    return 0
+  fi
+  rec P1 python "Python" pass "$(tilde "$pyp")"
+
+  if ver_ge "$ver" 3.10; then
+    rec P2 python "Версія Python" pass "$ver"
+  else
+    rec P2 python "Версія Python" fail "$ver, потрібна 3.10 або новіша" \
+      "Скрипти курсу розраховані на Python 3.10 і новіші." "$fix"
+    skip_python_rest "спершу потрібен новіший Python" P3 P4
+    return 0
+  fi
+
+  if [ "$NET_OK" -eq 0 ]; then
+    skip_python_rest "потрібен інтернет" P3 P4
+    return 0
+  fi
+  venv="$TMP/venv"
+  if ! python3 -m venv "$venv" >/dev/null 2>&1 </dev/null; then
+    rec P3 python "Встановлення бібліотек" fail "не вдалося створити окреме середовище" \
+      "Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові."
+    skip_python_rest "спершу мають встановлюватися бібліотеки" P4
+    return 0
+  fi
+  with_timeout "${AIM_PIP_TIMEOUT:-120}" "$venv/bin/python" -m pip install --no-cache-dir --quiet \
+    --disable-pip-version-check requests >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rec P3 python "Встановлення бібліотек" pass "бібліотека requests встановилася"
+  elif [ "$rc" -eq 143 ]; then
+    # 143 = stopped by the timeout: a slow network, not a broken Python.
+    rec P3 python "Встановлення бібліотек" warn "встановлення не завершилося за відведений час" \
+      "Інтернет працює повільно. Запустіть перевірку ще раз."
+    skip_python_rest "спершу мають встановлюватися бібліотеки" P4
+    return 0
+  else
+    rec P3 python "Встановлення бібліотек" fail "бібліотека requests не встановилася" \
+      "Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові."
+    skip_python_rest "спершу мають встановлюватися бібліотеки" P4
+    return 0
+  fi
+
+  cat > "$TMP/t.py" <<'PY'
+import requests
+print("Привіт від Python")
+print("HTTPS", requests.head("https://github.com", timeout=10, allow_redirects=True).status_code)
+PY
+  out="$(with_timeout 30 "$venv/bin/python" "$TMP/t.py" 2>/dev/null | cat)"
+  case "$out" in
+    *"Привіт від Python"*"HTTPS 200"*)
+      rec P4 python "Запуск скрипта" pass "скрипт надрукував український текст і відкрив сторінку" ;;
+    *)
+      rec P4 python "Запуск скрипта" fail "скрипт не відпрацював" \
+        "Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові." ;;
+  esac
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 mark() {

@@ -401,6 +401,80 @@ exit 0'
   teardown
 }
 
+test_healthy_python() {
+  setup
+  run_check -- --json
+  for id in P1 P2 P3 P4; do
+    ok "python: $id passes" has_status "$id" pass
+  done
+  teardown
+}
+
+test_python_missing() {
+  setup
+  rm "$BIN/python3"
+  run_check -- --json
+  ok "no python: P1 fails" has_status P1 fail
+  ok "no python: P2 skipped" has_status P2 skip
+  ok "no python: P4 skipped" has_status P4 skip
+  ok "no python, no brew: fix is uv" contains "astral.sh/uv/install.sh"
+  teardown
+}
+
+test_python_too_old() {
+  setup
+  run_check STUB_PY_VERSION=3.9.6 -- --json
+  ok "old python: P1 passes" has_status P1 pass
+  ok "old python: P2 fails" has_status P2 fail
+  ok "old python: P3 skipped" has_status P3 skip
+  ok "old python: names the version" contains "3.9.6, потрібна 3.10 або новіша"
+  teardown
+}
+
+test_pip_install_fails() {
+  setup
+  run_check STUB_PIP_RC=1 -- --json
+  ok "pip: P3 fails" has_status P3 fail
+  ok "pip: P4 skipped" has_status P4 skip
+  teardown
+}
+
+test_slow_network_makes_packages_a_warning() {
+  local started took
+  setup
+  started="$(date +%s)"
+  run_check STUB_PIP_HANGS=1 AIM_PIP_TIMEOUT=1 -- --json
+  took=$(( $(date +%s) - started ))
+  ok "slow network: P3 warns" has_status P3 warn
+  ok "slow network: P4 skipped" has_status P4 skip
+  ok "slow network: exit code stays 0" rc_is 0
+  ok "slow network: the hanging install was stopped" test "$took" -le 15
+  teardown
+}
+
+test_script_cannot_print_ukrainian() {
+  setup
+  run_check STUB_SCRIPT_BROKEN=1 -- --json
+  ok "script: P4 fails" has_status P4 fail
+  teardown
+}
+
+test_no_network_skips_python_packages() {
+  setup
+  run_check STUB_CURL_RC=6 -- --json
+  ok "no network: P3 skipped" has_status P3 skip
+  ok "no network: P4 skipped" has_status P4 skip
+  teardown
+}
+
+test_python_shim_counts_as_missing_without_command_line_tools() {
+  setup
+  run_check AIM_SHIM_DIR="$BIN" STUB_CLT_RC=2 -- --json
+  ok "no CLT: the python shim counts as missing" has_status P1 fail
+  ok "no CLT: P2 skipped" has_status P2 skip
+  teardown
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 for t in $(declare -F | cut -d' ' -f3 | grep '^test_'); do "$t"; done
