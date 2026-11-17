@@ -272,9 +272,11 @@ check_git() {
   elif with_timeout 20 gh auth status >/dev/null 2>&1; then
     rec G5 github "Вхід у GitHub" pass "вхід виконано"
   else
+    # Started by Claude, "gh auth login" has no terminal to ask in, so it signs in and leaves
+    # Git unconnected. The second command connects Git in the same round.
     rec G5 github "Вхід у GitHub" fail "вхід не виконано" \
-      "Команда покаже одноразовий код і відкриє GitHub у браузері. Введіть код і підтвердьте вхід." \
-      "browser${TAB}gh auth login --web --git-protocol https"
+      "Перша команда покаже одноразовий код і відкриє GitHub у браузері: введіть код і підтвердьте вхід. Друга дозволить Git користуватися цим входом." \
+      "browser${TAB}gh auth login --web --git-protocol https${NL}-${TAB}gh auth setup-git"
   fi
 
   # The check reads helper names only, never a stored credential. It cannot see whether a

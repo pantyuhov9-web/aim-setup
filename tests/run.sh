@@ -337,6 +337,7 @@ test_gh_logged_out() {
   run_check STUB_GH_AUTH_RC=1 -- --json
   ok "gh logged out: G5 fails" has_status G5 fail
   ok "gh logged out: prints the browser login" contains "gh auth login --web --git-protocol https"
+  ok "gh logged out: the same fix lets Git use that sign-in" contains '{"cmd":"gh auth setup-git","needs":""}'
   ok "gh logged out: G6 skipped" has_status G6 skip
   teardown
 }
@@ -537,7 +538,7 @@ test_report_never_carries_the_user_name() {
 test_json_block_is_one_record_per_line() {
   setup
   run_check STUB_GH_AUTH_RC=1 -- --json
-  ok "json: fix carries the command and its flag" contains '"fix":[{"cmd":"gh auth login --web --git-protocol https","needs":"browser"}]'
+  ok "json: fix carries each command and its flag" contains '"fix":[{"cmd":"gh auth login --web --git-protocol https","needs":"browser"},{"cmd":"gh auth setup-git","needs":""}]'
   ok "json: closes" contains "=== end json ==="
   teardown
 }
