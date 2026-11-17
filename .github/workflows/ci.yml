@@ -1,0 +1,46 @@
+# CI for the setup checker. No secrets are used, so pull requests from forks are safe to run.
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: shellcheck, pinned to the version the code was written against
+        run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck -s bash check.sh tests/run.sh
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: The system bash is the one students get
+        run: /bin/bash --version | head -1
+      - name: Hermetic tests on the system bash
+        run: /bin/bash tests/run.sh
+      - name: Real run, piped the way a student runs it
+        run: |
+          cat check.sh | /bin/bash -s -- --json > report.txt || true
+          cat report.txt
+      - name: The real run printed every record as valid JSON
+        run: |
+          sed -n '/=== aim-check json ===/,/=== end json ===/p' report.txt | sed '1d;$d' > report.json
+          python3 - <<'PY'
+          import json
+
+          records = json.load(open("report.json", encoding="utf-8"))
+          ids = [r["id"] for r in records]
+          want = ["S1", "S2", "S3", "S5", "C1", "C2", "C3", "G1", "G3", "G4", "G5", "G6", "G7",
+                  "P1", "P2", "P3", "P4"]
+          assert ids == want, ids
+          assert all(r["status"] in {"pass", "warn", "fail", "info", "skip"} for r in records)
+          print("real run:", len(records), "records, every status valid")
+          PY
