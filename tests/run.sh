@@ -475,6 +475,48 @@ test_python_shim_counts_as_missing_without_command_line_tools() {
   teardown
 }
 
+test_healthy_machine_passes() {
+  setup
+  run_check -- --json
+  ok "healthy: exit code 0" rc_is 0
+  for id in S1 S3 S5 C1 C2 C3 G1 G3 G4 G5 G6 P1 P2 P3 P4; do
+    ok "healthy: $id passes" has_status "$id" pass
+  done
+  ok "healthy: S2 is info" has_status S2 info
+  ok "healthy: G7 is skipped without the switch" has_status G7 skip
+  ok "healthy: says everything works" contains "Усе потрібне працює."
+  ok "healthy: no fix section" lacks "Як виправити"
+  ok "healthy: support block present" contains "----- звіт для куратора -----"
+  teardown
+}
+
+test_report_never_carries_the_user_name() {
+  setup
+  mkdir -p "$HOME_DIR/.local/bin"
+  mv "$BIN/python3" "$HOME_DIR/.local/bin/python3"
+  run_check PATH="$BIN:$HOME_DIR/.local/bin" -- --json --push-test
+  # shellcheck disable=SC2088  # the report prints a literal tilde
+  ok "privacy: python path shown with ~" contains "~/.local/bin/python3"
+  ok "privacy: home folder name absent" lacks "student"
+  ok "privacy: e-mail absent" lacks "olena@example.com"
+  teardown
+}
+
+test_json_block_is_one_record_per_line() {
+  setup
+  run_check STUB_GH_AUTH_RC=1 -- --json
+  ok "json: fix carries the command and its flag" contains '"fix":[{"cmd":"gh auth login --web --git-protocol https","needs":"browser"}]'
+  ok "json: closes" contains "=== end json ==="
+  teardown
+}
+
+test_report_carries_no_shell_job_notices() {
+  setup
+  run_check -- --json
+  ok "noise: no 'Terminated' notices from the timeout helper" lacks "Terminated"
+  teardown
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 for t in $(declare -F | cut -d' ' -f3 | grep '^test_'); do "$t"; done
