@@ -279,6 +279,128 @@ test_claude_mode_passes_by_construction() {
   teardown
 }
 
+test_healthy_git() {
+  setup
+  run_check -- --json
+  for id in G1 G3 G4 G5 G6; do
+    ok "git: $id passes" has_status "$id" pass
+  done
+  ok "git: G7 is skipped without the switch" has_status G7 skip
+  teardown
+}
+
+test_missing_command_line_tools_never_runs_the_shim() {
+  setup
+  run_check AIM_SHIM_DIR="$BIN" STUB_CLT_RC=2 -- --json
+  ok "no CLT: G1 fails" has_status G1 fail
+  ok "no CLT: the git shim was never executed" test ! -e "$W/git-ran"
+  ok "no CLT: prints the Apple installer" contains "xcode-select --install"
+  ok "no CLT: G3 skipped" has_status G3 skip
+  ok "no CLT: G6 skipped" has_status G6 skip
+  teardown
+}
+
+test_git_identity_missing() {
+  setup
+  run_check STUB_GIT_NAME= -- --json
+  ok "identity: G3 fails" has_status G3 fail
+  ok "identity: prints the name command" contains 'git config --global user.name'
+  ok "identity: prints the e-mail command" contains 'git config --global user.email'
+  teardown
+}
+
+test_gh_missing_uses_homebrew_when_present() {
+  setup
+  rm "$BIN/gh"
+  stub brew 'exit 0'
+  run_check -- --json
+  ok "gh missing + brew: G4 fails" has_status G4 fail
+  ok "gh missing + brew: fix is brew" contains "brew install gh"
+  ok "gh missing + brew: G5 skipped" has_status G5 skip
+  teardown
+}
+
+test_gh_missing_without_homebrew_downloads_the_release() {
+  setup
+  rm "$BIN/gh"
+  run_check -- --json
+  ok "gh missing, no brew: fix downloads the release" contains "github.com/cli/cli/releases/latest"
+  ok "gh missing, no brew: never installs Homebrew" lacks "Homebrew/install"
+  teardown
+}
+
+test_gh_logged_out() {
+  setup
+  run_check STUB_GH_AUTH_RC=1 -- --json
+  ok "gh logged out: G5 fails" has_status G5 fail
+  ok "gh logged out: prints the browser login" contains "gh auth login --web --git-protocol https"
+  ok "gh logged out: G6 skipped" has_status G6 skip
+  teardown
+}
+
+test_another_sign_in_route_is_a_warning_not_a_failure() {
+  setup
+  run_check STUB_HELPER= -- --json
+  ok "other helper: G6 warns" has_status G6 warn
+  ok "other helper: names the helper" contains "osxkeychain"
+  ok "other helper: still offers setup-git" contains "gh auth setup-git"
+  ok "other helper: exit code stays 0" rc_is 0
+  ok "other helper: summary admits a remark" contains "Головне працює. Є зауваження"
+  teardown
+}
+
+test_no_sign_in_route_at_all_fails() {
+  setup
+  run_check STUB_HELPER= STUB_ANY_HELPER= -- --json
+  ok "no helper: G6 fails" has_status G6 fail
+  ok "no helper: prints setup-git" contains "gh auth setup-git"
+  ok "no helper: exit code 1" rc_is 1
+  teardown
+}
+
+test_push_test_passes() {
+  setup
+  run_check -- --json --push-test
+  ok "push test: G7 passes" has_status G7 pass
+  ok "push test: exit code 0" rc_is 0
+  teardown
+}
+
+test_push_test_runs_when_the_helper_is_only_a_warning() {
+  setup
+  run_check STUB_HELPER= -- --json --push-test
+  ok "push with a warning: G7 passes" has_status G7 pass
+  teardown
+}
+
+test_push_test_reports_a_refused_push() {
+  setup
+  run_check STUB_PUSH_RC=1 -- --json --push-test
+  ok "push refused: G7 fails" has_status G7 fail
+  ok "push refused: says so" contains "GitHub не прийняв відправку"
+  ok "push refused: the fix switches Git to the GitHub CLI sign-in" contains '{"cmd":"gh auth setup-git","needs":""}'
+  teardown
+}
+
+test_no_network_skips_github_sign_in() {
+  setup
+  run_check STUB_CURL_RC=6 -- --json
+  ok "no network: G5 skipped" has_status G5 skip
+  ok "no network: G5 says why" contains "потрібен інтернет"
+  teardown
+}
+
+test_piped_script_is_not_eaten_by_children() {
+  setup
+  stub git 'cat >/dev/null
+case "$1 $2 $3" in "--version "*) echo "git version 2.47.1" ;; esac
+exit 0'
+  OUT="$(env -i PATH="$BIN" HOME="$HOME_DIR" AIM_SHIM_DIR="$W/shim" AIM_APPS_DIR="$APPS" \
+    /bin/bash -s -- --json < "$CHECK" 2>&1)"
+  ok "piped: the report still ends with the support block" contains "----- кінець звіту -----"
+  teardown
+}
+
 # ---- run every test --------------------------------------------------------------------
 
 for t in $(declare -F | cut -d' ' -f3 | grep '^test_'); do "$t"; done

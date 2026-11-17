@@ -187,6 +187,131 @@ check_claude() {
   fi
 }
 
+# ---- Git and GitHub --------------------------------------------------------------------
+
+push_test() { # prints the repo name on success, a reason on failure
+  local login repo dir head remote
+  login="$(with_timeout 20 gh api user -q .login 2>/dev/null)"
+  [ -n "$login" ] || { printf '%s' "не вдалося дізнатися обліковий запис GitHub"; return 1; }
+  repo="$login/aim-setup-check"
+  if ! with_timeout 20 gh repo view "$repo" >/dev/null 2>&1; then
+    with_timeout 30 gh repo create aim-setup-check --private \
+      -d "Setup check for an A&I Mastery course. Safe to delete." >/dev/null 2>&1 \
+      || { printf '%s' "не вдалося створити сховище aim-setup-check"; return 1; }
+  fi
+  dir="$TMP/push"
+  with_timeout 60 git clone -q "https://github.com/$repo.git" "$dir" >/dev/null 2>&1 \
+    || { printf '%s' "не вдалося отримати сховище з GitHub"; return 1; }
+  ( cd "$dir" && git checkout -q -B main </dev/null \
+      && date -u '+%Y-%m-%dT%H:%M:%SZ' > check.txt \
+      && git add check.txt </dev/null && git commit -q -m "setup check" </dev/null ) >/dev/null 2>&1 \
+    || { printf '%s' "не вдалося зберегти зміну"; return 1; }
+  ( cd "$dir" && with_timeout 60 git push -q -u origin main ) >/dev/null 2>&1 \
+    || { printf '%s' "GitHub не прийняв відправку"; return 1; }
+  head="$(cd "$dir" && git rev-parse HEAD 2>/dev/null </dev/null)"
+  remote="$(cd "$dir" && with_timeout 30 git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
+  [ -n "$head" ] && [ "$head" = "$remote" ] \
+    || { printf '%s' "GitHub не показує відправлену зміну"; return 1; }
+  printf '%s' "aim-setup-check"
+}
+
+check_git() {
+  local gitp ver name email helper other fix out
+  CLT=0
+  xcode-select -p >/dev/null 2>&1 </dev/null && CLT=1
+
+  gitp="$(command -v git 2>/dev/null)"
+  if [ -z "$gitp" ] || { [ "$gitp" = "$SHIM_DIR/git" ] && [ "$CLT" -eq 0 ]; }; then
+    rec G1 github "Git" fail "не встановлено" \
+      "Git на Mac входить до інструментів Apple. Команда відкриє вікно встановлення: натисніть «Встановити» і дочекайтеся завершення." \
+      "click${TAB}xcode-select --install"
+  else
+    ver="$(git --version 2>/dev/null </dev/null | sed 's/^git version //')"
+    rec G1 github "Git" pass "${ver:-знайдено}"
+  fi
+
+  if passed G1; then
+    name="$(git config --global user.name 2>/dev/null </dev/null)"
+    email="$(git config --global user.email 2>/dev/null </dev/null)"
+    if [ -n "$name" ] && [ -n "$email" ]; then
+      rec G3 github "Імʼя та пошта в Git" pass "вказано"
+    else
+      rec G3 github "Імʼя та пошта в Git" fail "не вказано" \
+        "Git підписує кожне збереження іменем і поштою. Підставте в лапках свої; пошта та сама, що в обліковому записі GitHub." \
+        "-${TAB}git config --global user.name \"Імʼя Прізвище\"${NL}-${TAB}git config --global user.email \"you@example.com\""
+    fi
+  else
+    rec G3 github "Імʼя та пошта в Git" skip "спершу потрібен Git"
+  fi
+
+  if have gh; then
+    ver="$(gh --version 2>/dev/null </dev/null | head -1 | sed -e 's/^gh version //' -e 's/ .*//')"
+    rec G4 github "GitHub CLI" pass "${ver:-знайдено}"
+  else
+    if have brew; then
+      fix="new-window${TAB}brew install gh"
+    else
+      fix="-${TAB}V=\$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest | sed 's#.*/v##'); A=\$(uname -m | sed 's/x86_64/amd64/'); curl -fsSL \"https://github.com/cli/cli/releases/download/v\$V/gh_\${V}_macOS_\$A.zip\" -o /tmp/gh.zip && unzip -qo /tmp/gh.zip -d /tmp/gh-unzip && mkdir -p ~/.local/bin && cp \"/tmp/gh-unzip/gh_\${V}_macOS_\$A/bin/gh\" ~/.local/bin/gh${NL}new-window${TAB}grep -q '.local/bin' ~/.zshrc 2>/dev/null || echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+    fi
+    rec G4 github "GitHub CLI" fail "не встановлено" \
+      "GitHub CLI виконує вхід у GitHub через браузер, а Git потім користується цим входом." "$fix"
+  fi
+
+  if ! passed G4; then
+    rec G5 github "Вхід у GitHub" skip "спершу потрібен GitHub CLI"
+  elif [ "$NET_OK" -eq 0 ]; then
+    rec G5 github "Вхід у GitHub" skip "потрібен інтернет"
+  elif with_timeout 20 gh auth status >/dev/null 2>&1; then
+    rec G5 github "Вхід у GitHub" pass "вхід виконано"
+  else
+    rec G5 github "Вхід у GitHub" fail "вхід не виконано" \
+      "Команда покаже одноразовий код і відкриє GitHub у браузері. Введіть код і підтвердьте вхід." \
+      "browser${TAB}gh auth login --web --git-protocol https"
+  fi
+
+  # The check reads helper names only, never a stored credential. It cannot see whether a
+  # helper other than GitHub CLI holds a GitHub sign-in, so that case is a warning and the
+  # push test decides.
+  if passed G1 && passed G5; then
+    helper="$(cd "$TMP" && git config --get-all credential.https://github.com.helper 2>/dev/null </dev/null)"
+    other="$(cd "$TMP" && git config --get-all credential.helper 2>/dev/null </dev/null | head -1)"
+    case "$helper" in
+      *"gh auth git-credential"*)
+        rec G6 github "Git користується входом у GitHub" pass "через GitHub CLI" ;;
+      *)
+        if [ -n "$other" ]; then
+          rec G6 github "Git користується входом у GitHub" warn \
+            "Git має інший спосіб входу ($(tilde "$other")); перевірка не бачить, чи збережено в ньому вхід у GitHub" \
+            "Якщо відправка на GitHub не спрацює, ця команда перемкне Git на вхід через GitHub CLI." \
+            "-${TAB}gh auth setup-git"
+        else
+          rec G6 github "Git користується входом у GitHub" fail "не налаштовано" \
+            "Після цієї команди Git відправляє зміни на GitHub без пароля." \
+            "-${TAB}gh auth setup-git"
+        fi ;;
+    esac
+  else
+    rec G6 github "Git користується входом у GitHub" skip "спершу потрібні Git і вхід у GitHub"
+  fi
+
+  if [ "$PUSH_TEST" -eq 0 ]; then
+    rec G7 github "Пробна відправка на GitHub" skip "вимкнено; вмикається ключем --push-test"
+  elif passed G3 && passed G5 && [ "$(status_of G6)" != fail ]; then
+    if out="$(push_test)"; then
+      rec G7 github "Пробна відправка на GitHub" pass "зміну відправлено у приватне сховище $out"
+    elif [ "$out" = "GitHub не прийняв відправку" ]; then
+      rec G7 github "Пробна відправка на GitHub" fail "$out" \
+        "Команда перемикає Git на вхід через GitHub CLI. Після неї запустіть перевірку з пробною відправкою ще раз." \
+        "-${TAB}gh auth setup-git"
+    else
+      rec G7 github "Пробна відправка на GitHub" fail "$out" \
+        "Запустіть перевірку ще раз. Якщо помилка повторюється, надішліть звіт кураторові."
+    fi
+  else
+    rec G7 github "Пробна відправка на GitHub" skip "спершу виправте пункти вище"
+  fi
+}
+
 # ---- report ----------------------------------------------------------------------------
 
 mark() {
