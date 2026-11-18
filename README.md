@@ -7,11 +7,15 @@ It answers one question: do Claude Code, Git-to-GitHub sync and Python scripts w
 
 macOS, in Terminal:
 
-    curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash
+    curl -fsSL https://ai-mastery.xyz/check.sh | bash
 
 Windows, in the window that Win+R and `cmd` opens (the same line works in PowerShell and in Git Bash):
 
-    powershell -NoProfile -Command "irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1 | iex"
+    powershell -NoProfile -Command "irm https://ai-mastery.xyz/check.ps1 | iex"
+
+Students get both commands, and the prompt that lets Claude run the check and fix what it finds,
+in [guide.uk.md](guide.uk.md). Each address on ai-mastery.xyz answers with a redirect to the same
+file on the `main` branch of this repo, so the repo can move without changing a command.
 
 The check is read-only. It installs nothing and leaves nothing behind. It prints what works,
 what is missing, and the command that fixes each missing piece. The report is in Ukrainian.
@@ -23,9 +27,9 @@ what is missing, and the command that fixes each missing piece. The report is in
 
 Pass a switch through the pipe like this:
 
-    curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash -s -- --push-test
+    curl -fsSL https://ai-mastery.xyz/check.sh | bash -s -- --push-test
 
-    powershell -NoProfile -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1))) -PushTest"
+    powershell -NoProfile -Command "& ([scriptblock]::Create((irm https://ai-mastery.xyz/check.ps1))) -PushTest"
 
 On Windows the report is written as UTF-8 bytes whenever the output is redirected, because the
 console code page of a Ukrainian PC often has no Cyrillic. To capture it to a file, redirect the

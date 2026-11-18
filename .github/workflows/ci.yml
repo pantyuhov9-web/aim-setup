@@ -21,8 +21,12 @@ jobs:
           test "$(cat mark.txt)" != "efbbbf"
       - name: The guide's two commands are the ones the checkers print
         run: |
-          grep -qF 'curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash' README.md
-          grep -qF 'powershell -NoProfile -Command "irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1 | iex"' README.md
+          for f in README.md guide.uk.md; do
+            grep -qF 'curl -fsSL https://ai-mastery.xyz/check.sh | bash' "$f"
+            grep -qF 'powershell -NoProfile -Command "irm https://ai-mastery.xyz/check.ps1 | iex"' "$f"
+          done
+          grep -qF "BASE_URL='https://ai-mastery.xyz'" check.sh
+          grep -qF "\$script:BaseUrl = 'https://ai-mastery.xyz'" check.ps1
   macos:
     runs-on: macos-latest
     timeout-minutes: 15
