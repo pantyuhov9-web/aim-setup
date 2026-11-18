@@ -13,9 +13,12 @@ Windows, in the window that Win+R and `cmd` opens (the same line works in PowerS
 
     powershell -NoProfile -Command "irm https://ai-mastery.xyz/check.ps1 | iex"
 
-Students get both commands, and the prompt that lets Claude run the check and fix what it finds,
-in [guide.uk.md](guide.uk.md). Each address on ai-mastery.xyz answers with a redirect to the same
-file on the `main` branch of this repo, so the repo can move without changing a command.
+Students get [guide.uk.md](guide.uk.md). It installs Claude Code, Git and Python from their
+official pages first, then gives a prompt that asks Claude to check the computer in plain words.
+The checker is the fallback, in two forms: a prompt that has Claude run it, for when the first
+prompt did not work, and the commands above, for a terminal without Claude. Each address on
+ai-mastery.xyz answers with a redirect to the same file on the `main` branch of this repo, so the
+repo can move without changing a command.
 
 The check is read-only. It installs nothing and leaves nothing behind. It prints what works,
 what is missing, and the command that fixes each missing piece. The report is in Ukrainian.
