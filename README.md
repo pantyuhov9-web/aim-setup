@@ -13,12 +13,18 @@ Windows, in the window that Win+R and `cmd` opens (the same line works in PowerS
 
     powershell -NoProfile -Command "irm https://ai-mastery.xyz/check.ps1 | iex"
 
-Students get [guide.uk.md](guide.uk.md). It installs Claude Code, Git and Python from their
-official pages first, then gives a prompt that asks Claude to check the computer in plain words.
-The checker is the fallback, in two forms: a prompt that has Claude run it, for when the first
-prompt did not work, and the commands above, for a terminal without Claude. Each address on
-ai-mastery.xyz answers with a redirect to the same file on the `main` branch of this repo, so the
-repo can move without changing a command.
+Students get one of two guides, both in Ukrainian:
+
+- [guide-simple.uk.md](guide-simple.uk.md), also as [guide-simple.uk.pdf](guide-simple.uk.pdf), is
+  the short one: install Claude from its official page, paste one prompt, and Claude walks the
+  student through everything that is missing.
+- [guide.uk.md](guide.uk.md) is the full one. It installs Claude Code, Git and Python from their
+  official pages first, then gives a prompt that asks Claude to check the computer in plain words.
+  The checker is its fallback, in two forms: a prompt that has Claude run it, for when the first
+  prompt did not work, and the commands above, for a terminal without Claude.
+
+Each address on ai-mastery.xyz answers with a redirect to the same file on the `main` branch of
+this repo, so the repo can move without changing a command.
 
 The check is read-only. It installs nothing and leaves nothing behind. It prints what works,
 what is missing, and the command that fixes each missing piece. The report is in Ukrainian.
@@ -114,3 +120,10 @@ macOS: no associative arrays. `check.ps1` runs on Windows PowerShell 5.1, the ve
 Windows: no PowerShell 7 syntax, no `exit`, and the file carries no byte-order mark, because it
 is fetched and run as a string. `tests\run.ps1` does carry one, since 5.1 reads a file without
 it as the system code page and the tests compare Ukrainian strings.
+
+The short guide's PDF is built from its Markdown file and never edited by hand:
+
+    python3 make_pdf.py
+
+It needs Chrome, which prints the page. With pypdf or PyMuPDF installed, the script reads the
+PDF back and fails unless every line of the prompt can be copied out of it.
