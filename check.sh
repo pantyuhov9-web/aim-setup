@@ -2,7 +2,7 @@
 # aim-setup: setup check for macOS, for students of A&I Mastery courses built on Claude Code.
 # It answers one question: do Claude Code, Git-to-GitHub sync and Python scripts work here?
 #
-# Run:       curl -fsSL https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.sh | bash
+# Run:       curl -fsSL https://ai-mastery.xyz/check.sh | bash
 # Switches:  --json        also print the records as JSON
 #            --push-test   create or reuse a private repo "aim-setup-check" and push to it
 #
@@ -12,8 +12,9 @@
 # Commands that may read standard input get </dev/null, so none can swallow a piped script.
 # Test hooks (tests/run.sh only): AIM_SHIM_DIR, AIM_APPS_DIR, AIM_CHECK_LIB, AIM_PIP_TIMEOUT.
 
-# The address moves to https://ai-mastery.xyz once that site redirects to this repo.
-BASE_URL='https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main'
+# ai-mastery.xyz answers each address with a redirect to the same file on the main branch of
+# pantyuhov9-web/aim-setup, so the repo can move without changing the command a student pastes.
+BASE_URL='https://ai-mastery.xyz'
 RUN_CMD="curl -fsSL $BASE_URL/check.sh | bash"
 PUSH_CMD="curl -fsSL $BASE_URL/check.sh | bash -s -- --push-test"
 TAB="$(printf '\t')"

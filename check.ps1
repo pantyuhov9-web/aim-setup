@@ -1,7 +1,7 @@
 # aim-setup: setup check for Windows, for students of A&I Mastery courses built on Claude Code.
 # It answers one question: do Claude Code, Git-to-GitHub sync and Python scripts work here?
 #
-# Run:       powershell -NoProfile -Command "irm https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main/check.ps1 | iex"
+# Run:       powershell -NoProfile -Command "irm https://ai-mastery.xyz/check.ps1 | iex"
 # Switches:  -Json        also print the records as JSON
 #            -PushTest    create or reuse a private repo "aim-setup-check" and push to it
 #            Pass one through the pipe with the scriptblock form; see $script:PushCmd below.
@@ -22,8 +22,9 @@
 
 param([switch]$Json, [switch]$PushTest)
 
-# The address moves to https://ai-mastery.xyz once that site redirects to this repo.
-$script:BaseUrl = 'https://raw.githubusercontent.com/pantyuhov9-web/aim-setup/main'
+# ai-mastery.xyz answers each address with a redirect to the same file on the main branch of
+# pantyuhov9-web/aim-setup, so the repo can move without changing the command a student pastes.
+$script:BaseUrl = 'https://ai-mastery.xyz'
 $script:RunCmd = 'powershell -NoProfile -Command "irm ' + $script:BaseUrl + '/check.ps1 | iex"'
 $script:PushCmd = 'powershell -NoProfile -Command "& ([scriptblock]::Create((irm ' + $script:BaseUrl + '/check.ps1))) -PushTest"'
 

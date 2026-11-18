@@ -274,6 +274,7 @@ function Test-AimClaudeModeAddsJsonAndProcedure {
   Write-Ok 'Claude mode: JSON block without the switch' (Test-Text '=== aim-check json ===')
   Write-Ok 'Claude mode: procedure printed' (Test-Text '=== порядок дій для Claude ===')
   Write-Ok 'Claude mode: the procedure carries the push-test command' (Test-Text 'scriptblock]::Create((irm')
+  Write-Ok "Claude mode: the push-test command uses the school's address" (Test-Text '(irm https://ai-mastery.xyz/check.ps1))) -PushTest')
   Write-Ok 'Claude mode: the procedure fixes failures only' (Test-Text 'тільки пункти зі статусом fail')
   Write-Ok 'Claude mode: warnings are explained, their commands are not run' (Test-Text 'їхніх команд не виконуй')
   Remove-Machine
@@ -656,6 +657,7 @@ function Test-AimGitHubCliLoggedOut {
   Invoke-Check -Switches @('-Json')
   Write-Ok 'gh logged out: G5 fails' (Test-Status G5 'fail')
   Write-Ok 'gh logged out: prints the browser login' (Test-Text 'gh auth login --web --git-protocol https')
+  Write-Ok "gh logged out: the rerun command uses the school's address" (Test-Text 'irm https://ai-mastery.xyz/check.ps1 | iex')
   Write-Ok 'gh logged out: the same fix lets Git use that sign-in' (Test-Text '{"cmd":"gh auth setup-git","needs":""}')
   Write-Ok 'gh logged out: G6 skipped' (Test-Status G6 'skip')
   Remove-Machine

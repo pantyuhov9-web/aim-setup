@@ -144,6 +144,7 @@ test_claude_mode_adds_json_and_procedure() {
   ok "Claude mode: JSON block without the switch" contains "=== aim-check json ==="
   ok "Claude mode: procedure printed" contains "=== порядок дій для Claude ==="
   ok "Claude mode: procedure carries the push-test command" contains "bash -s -- --push-test"
+  ok "Claude mode: the push-test command uses the school's address" contains "curl -fsSL https://ai-mastery.xyz/check.sh | bash -s -- --push-test"
   ok "Claude mode: the procedure fixes failures only" contains "тільки пункти зі статусом fail"
   ok "Claude mode: warnings are explained, their commands are not run" contains "їхніх команд не виконуй"
   teardown
@@ -353,6 +354,7 @@ test_gh_logged_out() {
   ok "gh logged out: G5 fails" has_status G5 fail
   ok "gh logged out: prints the browser login" contains "gh auth login --web --git-protocol https"
   ok "gh logged out: the same fix lets Git use that sign-in" contains '{"cmd":"gh auth setup-git","needs":""}'
+  ok "gh logged out: the rerun command uses the school's address" contains "   curl -fsSL https://ai-mastery.xyz/check.sh | bash"
   ok "gh logged out: G6 skipped" has_status G6 skip
   teardown
 }
